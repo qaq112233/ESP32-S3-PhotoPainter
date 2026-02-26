@@ -8,6 +8,8 @@
 - Firmware burning instructions link: [Click here to expand and view](https://www.waveshare.com/wiki/ESP32-S3-PhotoPainter#Firmware_Flashing_Instructions)
 
 ## Change log
+### [1.2.1] 2026/02/26
+- In Mode 3, by double-clicking the BOOT button in any situation, you can enter the network configuration.
 
 ### [1.2.0] 2026/01/30
 - Supports JPG, PNG, and BMP image formats natively; no longer requires conversion via specific software for display.
@@ -30,6 +32,9 @@
 - Fixed the display anomaly where the device screen presents a blank screen when the TF card image reading operation fails.
 
 ## 更新日志
+
+### [1.2.1] 2026/02/26
+- 在模式3下，任何情况下双击BOOT按键可进入配网
 
 ### [1.2.0] 2026/01/30
 - 兼容JPG,PNG,BMP图片,不再需要经过特定的软件转换才能显示
