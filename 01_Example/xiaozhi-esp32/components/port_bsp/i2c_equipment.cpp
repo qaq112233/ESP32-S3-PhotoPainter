@@ -161,7 +161,6 @@ uint8_t Shtc3Port::Shtc3_ReadTempHumi(float *t,float *h) {
     error = Shtc3_GetTempAndHumiPolling(t, h);
     if (error != NO_ERROR) {
         ESP_LOGW("shtc3", "error:%d", error);
-    } else {
         return 0;
     }
     Shtc3_Sleep();
