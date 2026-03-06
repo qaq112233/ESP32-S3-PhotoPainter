@@ -45,7 +45,7 @@ static void boot_button_user_Task(void *arg) {
     uint8_t *wakeup_arg = (uint8_t *) arg;
     ePaperDisplay.EPD_Init();
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, set_bit_all, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, 0x01, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
         if (get_bit_button(even, 0)) {
             if (*wakeup_arg == 0) {
                 if (pdTRUE == xSemaphoreTake(epaper_gui_semapHandle, 2000)) {                       

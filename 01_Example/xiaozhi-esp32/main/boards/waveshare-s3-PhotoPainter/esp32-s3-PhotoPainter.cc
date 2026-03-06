@@ -25,7 +25,7 @@ class waveshare_PhotoPainter : public WifiBoard {
     }
 
     void InitializeButtons() {
-        boot_button_.OnDoubleClick([this]() {
+        boot_button_.OnLongPress([this]() {
             ResetWifiConfiguration();
         });
     }

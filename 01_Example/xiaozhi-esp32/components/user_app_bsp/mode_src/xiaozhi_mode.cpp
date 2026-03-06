@@ -46,14 +46,14 @@ void xiaozhi_init_received(const char *arg1)
         return;
     if (strstr(arg1, "版本") != NULL) {
         Oneime          = 1;
-        const char *str = auto_get_weather_json();
-        ESP_LOGW("xiaozhi_init","received arg:%s",arg1);
+        const char *str = get_weather_data();
+        //ESP_LOGW("xiaozhi_init","Weather data : %s",str);
         xEventGroupSetBits(Red_led_Mode_queue, set_bit_button(0));
         if(str == NULL) {
             ESP_LOGE("xiaozhi_init","json decoding failed");
             return;
         }
-        WeatherData = WeaPort.WeatherPort_DecodingSring(str);      
+        WeatherData = WeaPort.WeatherPort_DecodingSring(str);   
         if(WeatherData == NULL) {
             ESP_LOGE("xiaozhi_init","WeatherData is NULL");
             return;

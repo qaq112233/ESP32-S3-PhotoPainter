@@ -1,293 +1,220 @@
-/********************************************************
-目前该文件的内容仅支持中国大陆的天气获取，定位可以支持到中国大陆以外，但是目前没有对中国大陆以外的的位置信息进行处理，
-因此该文件中存在中文打印以及中文注释，请谅解
-如果您有比较友好的中国大陆以外天气及WiFi定位，欢迎反馈
-At present, the content of this document only supports weather acquisition in Chinese mainland. Positioning can be supported outside Chinese mainland, but the location information outside Chinese mainland has not been processed yet.
-Therefore, there are Chinese prints and Chinese annotations in this document. We apologize for any inconvenience
-If you have friendly weather and WiFi location information outside Chinese mainland, please feel free to give us your feedback
-********************************************************/
 #include "client_app.h"
-#include "cJSON.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
-
-#define MIN(x, y) ((x < y) ? (x) : (y))
+#include "esp_system.h"
+#include <string.h>
+#include <stdlib.h>
+#include <esp_wifi.h>
 
 static const char *TAG = "client_bsp";
 
-char province[64] = {0};
-char city[64]     = {0};
+// Define the fixed weather API URL
+#define WEATHER_API_URL "http://t.weather.sojson.com/api/weather/city/101280601"
+// Maximum size of the HTTP response buffer
+#define MAX_HTTP_RESPONSE_BUFFER (1024 * 8) // 8KB buffer
+// HTTP request timeout in milliseconds
+#define HTTP_REQUEST_TIMEOUT 10000
+// Maximum number of retry attempts
+#define MAX_RETRY_ATTEMPTS 1
 
-extern const char api_root_cert_pem_start[] asm("_binary_api_root_cert_pem_start");
-extern const char api_root_cert_pem_end[] asm("_binary_api_root_cert_pem_end");
-
-#define MAX_HTTP_OUTPUT_BUFFER (1024 * 6)
-#define UserDateURL "http://t.weather.sojson.com/api/weather/city/101280601"
-#define AMAP_IP_URL "http://restapi.amap.com/v3/ip?key=0113a13c88697dcea6a445584d535837"
-
-/*
-HTTP_EVENT_ERROR	请求出错
-HTTP_EVENT_ON_CONNECTED	建立连接成功
-HTTP_EVENT_HEADER_SENT	请求头已发送
-HTTP_EVENT_ON_HEADER	收到响应头字段
-HTTP_EVENT_ON_DATA	  收到响应体数据(可能多次)
-HTTP_EVENT_ON_FINISH	响应体接收完毕
-HTTP_EVENT_DISCONNECTED	连接断开，检查 TLS 错误等
-HTTP_EVENT_REDIRECT	收到重定向，决定是否跳转
-*/
-esp_err_t _http_event_handler(esp_http_client_event_t *evt) {
-    static char *output_buffer; // Buffer to store response of http request from event handler
-    static int   output_len;    // Stores number of bytes read
+/**
+ * @brief HTTP event handler
+ * @param evt HTTP client event
+ * @return ESP_OK on success, other values on error
+ */
+static esp_err_t _http_event_handler(esp_http_client_event_t *evt) {
+    static int output_len = 0;
+    
     switch (evt->event_id) {
     case HTTP_EVENT_ERROR:
-        ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+        ESP_LOGE(TAG, "HTTP_EVENT_ERROR - Error occurred during HTTP request");
         break;
     case HTTP_EVENT_ON_CONNECTED:
-        ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
         output_len = 0;
         break;
     case HTTP_EVENT_HEADER_SENT:
-        ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
         break;
     case HTTP_EVENT_ON_HEADER:
-        ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+        // Check for content-length header
+        if (strcmp(evt->header_key, "Content-Length") == 0) {
+            int content_len = atoi(evt->header_value);
+            ESP_LOGI(TAG, "Content-Length: %d bytes", content_len);
+        }
         break;
     case HTTP_EVENT_ON_DATA:
-        ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-        // Clean the buffer in case of a new request
-        if (output_len == 0 && evt->user_data) {
-            // we are just starting to copy the output data into the use
-            memset(evt->user_data, 0, MAX_HTTP_OUTPUT_BUFFER);
-        }
-        if (!esp_http_client_is_chunked_response(evt->client)) {
-            // If user_data buffer is configured, copy the response into the buffer
-            int copy_len = 0;
-            if (evt->user_data) {
-                // The last byte in evt->user_data is kept for the NULL character in case of out-of-bound access.
-                copy_len = MIN(evt->data_len, (MAX_HTTP_OUTPUT_BUFFER - output_len));
-                if (copy_len) {
-                    memcpy(evt->user_data + output_len, evt->data, copy_len);
-                }
-            } else {
-                int content_len = esp_http_client_get_content_length(evt->client);
-                if (output_buffer == NULL) {
-                    // We initialize output_buffer with 0 because it is used by strlen() and similar functions therefore should be null terminated.
-                    output_buffer = (char *) calloc(content_len + 1, sizeof(char));
-                    output_len    = 0;
-                    if (output_buffer == NULL) {
-                        ESP_LOGE(TAG, "Failed to allocate memory for output buffer");
-                        return ESP_FAIL;
-                    }
-                }
-                copy_len = MIN(evt->data_len, (content_len - output_len));
-                if (copy_len) {
-                    memcpy(output_buffer + output_len, evt->data, copy_len);
-                }
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d, chunked=%d", 
+                 evt->data_len, esp_http_client_is_chunked_response(evt->client));
+        
+        // Copy response data to buffer - handle both chunked and non-chunked responses
+        if (evt->user_data) {
+            int copy_len = evt->data_len;
+            if (output_len + copy_len > MAX_HTTP_RESPONSE_BUFFER) {
+                copy_len = MAX_HTTP_RESPONSE_BUFFER - output_len;
+                ESP_LOGW(TAG, "Response buffer almost full, truncating data. Current length: %d, copying: %d bytes", output_len, copy_len);
             }
-            output_len += copy_len;
+            
+            if (copy_len > 0) {
+                memcpy(evt->user_data + output_len, evt->data, copy_len);
+                output_len += copy_len;
+                // Add null terminator after each data chunk
+                ((char*)evt->user_data)[output_len] = '\0';
+            }
         }
         break;
     case HTTP_EVENT_ON_FINISH:
-        ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
+        ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH. Total data received: %d bytes", output_len);
         break;
     case HTTP_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
         break;
-    case HTTP_EVENT_REDIRECT:
-        ESP_LOGI(TAG, "HTTP_EVENT_REDIRECT");
+    default:
         break;
     }
-
+    
     return ESP_OK;
 }
 
-const char *fetch_weather_data(void) {
-
-    char                    *local_response_buffer = (char *) heap_caps_malloc(MAX_HTTP_OUTPUT_BUFFER + 1, MALLOC_CAP_SPIRAM);
-    esp_http_client_config_t config =
-        {
-            .url                   = UserDateURL,
-            .event_handler         = _http_event_handler,
-            .user_data             = local_response_buffer,
-            .disable_auto_redirect = true,
-        };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    // GET
-    esp_err_t err = esp_http_client_perform(client);
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %" PRId64,
-                 esp_http_client_get_status_code(client),
-                 esp_http_client_get_content_length(client));
+/**
+ * @brief Get weather data from the fixed API URL
+ * @return Weather data JSON string, or NULL on failure
+ * @note The caller must free the returned memory using free_weather_data()
+ */
+const char *get_weather_data(void) {
+    ESP_LOGI(TAG, "=== Starting weather data retrieval ===");
+    
+    // Check WiFi connection status
+    wifi_ap_record_t ap_info;
+    memset(&ap_info, 0, sizeof(ap_info));
+    esp_err_t wifi_err = esp_wifi_sta_get_ap_info(&ap_info);
+    if (wifi_err == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi connected to: %s", ap_info.ssid);
     } else {
-        ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(err));
-    }
-    //ESP_LOG_BUFFER_HEX(TAG, local_response_buffer, strlen(local_response_buffer));
-    //printf("str:%s\n",local_response_buffer);
-    //heap_caps_free(local_response_buffer);
-    //local_response_buffer = NULL;
-    esp_http_client_cleanup(client);
-
-    return local_response_buffer;
-}
-
-// 去除“省”“市”后缀
-// 去除结尾的“省”“市”“区”“县”“盟”“自治州”“特别行政区”
-void trim_suffix(char *str) {
-    size_t len = strlen(str);
-    // 先处理“自治区”“自治州”“特别行政区”
-    if (len >= 12 && strcmp(str + len - 12, "特别行政区") == 0) {
-        str[len - 12] = '\0';
-    } else if (len >= 9 && strcmp(str + len - 9, "自治州") == 0) {
-        str[len - 9] = '\0';
-    } else if (len >= 9 && strcmp(str + len - 9, "自治区") == 0) {
-        str[len - 9] = '\0';
-    } else if (len >= 3) {
-        // 常见后缀
-        const char *suffixes[] = {"省", "市", "区", "县", "盟"};
-        for (int i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
-            size_t suf_len = strlen(suffixes[i]);
-            if (len >= suf_len && strcmp(str + len - suf_len, suffixes[i]) == 0) {
-                str[len - suf_len] = '\0';
-                break;
-            }
-        }
-    }
-}
-
-// automatic orientation
-int fetch_adcode(char *adcode_buf, size_t buf_len) {
-    char *local_response_buffer = (char *) heap_caps_malloc(MAX_HTTP_OUTPUT_BUFFER + 1, MALLOC_CAP_SPIRAM);
-    if (!local_response_buffer)
-        return 0;
-
-    esp_http_client_config_t config = {
-        .url                   = AMAP_IP_URL,
-        .event_handler         = _http_event_handler,
-        .user_data             = local_response_buffer,
-        .disable_auto_redirect = true,
-        // .cert_pem = api_root_cert_pem_start,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_err_t                err    = esp_http_client_perform(client);
-    esp_http_client_cleanup(client);
-
-    if (err != ESP_OK) {
-        heap_caps_free(local_response_buffer);
-        return 0;
-    }
-
-    cJSON *root = cJSON_Parse(local_response_buffer);
-    heap_caps_free(local_response_buffer);
-    if (!root)
-        return 0;
-
-    cJSON *province_item = cJSON_GetObjectItem(root, "province");
-    cJSON *city_item     = cJSON_GetObjectItem(root, "city");
-    int    ret           = 0;
-    if (province_item && cJSON_IsString(province_item) && city_item && cJSON_IsString(city_item)) {
-        strncpy(province, province_item->valuestring, sizeof(province) - 1);
-        province[sizeof(province) - 1] = '\0';
-        strncpy(city, city_item->valuestring, sizeof(city) - 1);
-        city[sizeof(city) - 1] = '\0';
-
-        // Remove the suffix
-        trim_suffix(province);
-        trim_suffix(city);
-
-        FILE *fp = fopen("/sdcard/01_sys_init_img/city_code.txt", "r");
-        if (fp) {
-            char line[128];
-            while (fgets(line, sizeof(line), fp)) {
-                char file_prov[64], file_city[64], file_code[32];
-                if (sscanf(line, "%15[^,],%15[^,],%15s", file_prov, file_city, file_code) == 3) {
-                    // ESP_LOGI(TAG, "查找: txt省市=%s %s, 定位省市=%s %s", file_prov, file_city, province, city);
-                    if (strcmp(file_prov, province) == 0 && strcmp(file_city, city) == 0) {
-                        strncpy(adcode_buf, file_code, buf_len - 1);
-                        adcode_buf[buf_len - 1] = '\0';
-                        ret                     = 1;
-                        break;
-                    }
-                }
-            }
-            fclose(fp);
-        } else {
-            ESP_LOGI("SDCARD", "The file has been opened successfully.");
-            fclose(fp);
-        }
-    }
-    // ESP_LOGI(TAG, "定位省市: %s %s", province, city);
-    // ESP_LOGI(TAG, "查找编码: %s", adcode_buf);
-    cJSON_Delete(root);
-    return ret;
-}
-
-// Obtain weather data
-const char *fetch_weather_data_by_adcode(const char *adcode) {
-    char url[128];
-    snprintf(url, sizeof(url), "http://t.weather.sojson.com/api/weather/city/%s", adcode);
-    ESP_LOGI(TAG, "天气API地址: %s", url);
-
-    char *local_response_buffer = (char *) heap_caps_malloc(MAX_HTTP_OUTPUT_BUFFER + 1, MALLOC_CAP_SPIRAM);
-    if (!local_response_buffer)
+        ESP_LOGE(TAG, "WiFi not connected: %s", esp_err_to_name(wifi_err));
         return NULL;
-
-    esp_http_client_config_t config = {
-        .url                   = url,
-        .event_handler         = _http_event_handler,
-        .user_data             = local_response_buffer,
-        .disable_auto_redirect = true,
-        // .cert_pem = NULL,
-    };
-    esp_http_client_handle_t client = esp_http_client_init(&config);
-    esp_err_t                err    = esp_http_client_perform(client);
-
-    if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %" PRId64,
-                 esp_http_client_get_status_code(client),
-                 esp_http_client_get_content_length(client));
-    } else {
-        ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(err));
     }
-
-    esp_http_client_cleanup(client);
-
-    return local_response_buffer;
-}
-
-// Automatically locate and obtain the main weather process
-void auto_get_weather(void) {
-    char adcode[16] = {0};
-    if (fetch_adcode(adcode, sizeof(adcode))) {
-        // ESP_LOGI(TAG, "当前定位 adcode: %s", adcode);
-        const char *weather_json = fetch_weather_data_by_adcode(adcode);
-        if (weather_json) {
-            // ESP_LOGI(TAG, "天气数据: %s", weather_json);
-            heap_caps_free((void *) weather_json);
+    
+    ESP_LOGI(TAG, "Requesting weather data from: %s", WEATHER_API_URL);
+    
+    char *response_buffer = NULL;
+    esp_http_client_handle_t client = NULL;
+    int retry_count = 0;
+    esp_err_t err = ESP_FAIL;
+    
+    while (retry_count < MAX_RETRY_ATTEMPTS) {
+        // Allocate memory for response buffer
+        ESP_LOGD(TAG, "Allocating %d bytes for response buffer", MAX_HTTP_RESPONSE_BUFFER + 1);
+        // Use heap_caps_malloc with SPIRAM capability for better memory management
+        response_buffer = (char *)heap_caps_malloc(MAX_HTTP_RESPONSE_BUFFER + 1, MALLOC_CAP_SPIRAM);
+        if (!response_buffer) {
+            ESP_LOGE(TAG, "Failed to allocate memory for response buffer");
+            // Try regular malloc if SPIRAM allocation fails
+            response_buffer = (char *)malloc(MAX_HTTP_RESPONSE_BUFFER + 1);
+            if (!response_buffer) {
+                ESP_LOGE(TAG, "Failed to allocate memory using regular malloc");
+                return NULL;
+            } else {
+                ESP_LOGW(TAG, "Successfully allocated memory using regular malloc");
+            }
         } else {
-            ESP_LOGE(TAG, "天气数据获取失败");
+            ESP_LOGD(TAG, "Successfully allocated memory from SPIRAM");
         }
-    } else {
-        ESP_LOGE(TAG, "定位失败，无法获取 adcode");
-    }
-}
-
-const char *auto_get_weather_json(void) {
-    char adcode[16] = {0};
-    // fetch_adcode(adcode, sizeof(adcode));
-    // const char *weather_json = fetch_weather_data();
-    // ESP_LOGI(TAG, "天气数据: %s", weather_json);
-    // return weather_json;
-    if (fetch_adcode(adcode, sizeof(adcode))) {
-        const char *weather_json = fetch_weather_data_by_adcode(adcode);
-        if (weather_json) {
-            // ESP_LOGI(TAG, "天气数据: %s", weather_json);
-            ESP_LOGI(TAG, "天气数据获取成功");
-            return weather_json;
+        memset(response_buffer, 0, MAX_HTTP_RESPONSE_BUFFER + 1);
+        
+        // Configure HTTP client
+        ESP_LOGD(TAG, "Configuring HTTP client with %dms timeout", HTTP_REQUEST_TIMEOUT);
+        esp_http_client_config_t config = {
+            .url = WEATHER_API_URL,
+            .event_handler = _http_event_handler,
+            .user_data = response_buffer,
+            .timeout_ms = HTTP_REQUEST_TIMEOUT,
+            .disable_auto_redirect = false,
+        };
+        
+        // Initialize HTTP client
+        client = esp_http_client_init(&config);
+        if (client) {
+            // Add User-Agent header to mimic a browser request
+            esp_http_client_set_header(client, "User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36");
+            // Add Accept header
+            esp_http_client_set_header(client, "Accept", "application/json");
         } else {
-            ESP_LOGE(TAG, "天气数据获取失败");
+            ESP_LOGE(TAG, "Failed to initialize HTTP client");
+            free(response_buffer);
+            response_buffer = NULL;
+            retry_count++;
+            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            continue;
         }
-    } else {
-        ESP_LOGE(TAG, "定位失败，无法获取 adcode");
+        
+        // Perform HTTP request
+        ESP_LOGI(TAG, "Performing HTTP request... (Attempt %d/%d)", retry_count + 1, MAX_RETRY_ATTEMPTS);
+        err = esp_http_client_perform(client);
+        
+        if (err == ESP_OK) {
+            int status_code = esp_http_client_get_status_code(client);
+            int content_len = esp_http_client_get_content_length(client);
+            ESP_LOGI(TAG, "HTTP request completed with status: %d, content length: %d", status_code, content_len);
+            
+            // Always log response buffer status
+            int buffer_len = response_buffer ? strlen(response_buffer) : 0;
+            ESP_LOGI(TAG, "Response buffer length: %d bytes", buffer_len);
+            
+            if (status_code == 200) {
+                // Log the first 100 characters of response for debugging
+                if (buffer_len > 0) {
+                    int log_len = buffer_len < 100 ? buffer_len : 100;
+                    ESP_LOGI(TAG, "Response data (first %d chars): %.*s", log_len, log_len, response_buffer);
+                } else {
+                    ESP_LOGW(TAG, "Response buffer is empty even though status code is 200");
+                }
+                ESP_LOGI(TAG, "Weather data obtained successfully");
+                break; // Success, exit retry loop
+            } else {
+                ESP_LOGE(TAG, "HTTP request failed with status code: %d", status_code);
+                err = ESP_FAIL;
+            }
+        } else {
+            ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
+        }
+        
+        // Clean up on failure
+        esp_http_client_cleanup(client);
+        free(response_buffer);
+        response_buffer = NULL;
+        client = NULL;
+        
+        retry_count++;
+        ESP_LOGI(TAG, "Retrying (%d/%d)...", retry_count, MAX_RETRY_ATTEMPTS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
-    return NULL;
+    
+    // Clean up and return result
+    if (client) {
+        esp_http_client_cleanup(client);
+    }
+    
+    if (err != ESP_OK || !response_buffer) {
+        ESP_LOGE(TAG, "Failed to get weather data after %d attempts", MAX_RETRY_ATTEMPTS);
+        if (response_buffer) {
+            ESP_LOGD(TAG, "Freeing response buffer due to failure");
+            // Free memory using the same method that allocated it
+            heap_caps_free(response_buffer);
+            response_buffer = NULL;
+        }
+        return NULL;
+    }
+    
+    // Final check before returning
+    if (strlen(response_buffer) == 0) {
+        ESP_LOGE(TAG, "Response buffer is empty even though status code is 200");
+        heap_caps_free(response_buffer);
+        return NULL;
+    }
+    
+    ESP_LOGI(TAG, "=== Weather data retrieval completed successfully ===");
+    
+    return response_buffer;
 }

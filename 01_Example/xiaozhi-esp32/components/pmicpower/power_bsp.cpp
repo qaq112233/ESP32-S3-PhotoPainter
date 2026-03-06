@@ -100,8 +100,8 @@ void Custom_PmicRegisterInit(void) {
     }
 
     axp2101.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
-    axp2101.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_200MA);
-    axp2101.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_50MA);
+    axp2101.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
+    axp2101.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
 }
 
 void Axp2101_isChargingTask(void *arg) {
@@ -125,4 +125,37 @@ void Axp2101_isChargingTask(void *arg) {
         ESP_LOGI(TAG, "getBattVoltage: %dmV", axp2101.getBattVoltage());
         ESP_LOGI(TAG, "getBatteryPercent: %d%%", axp2101.getBatteryPercent());
     }
+}
+
+PmicRegisterConfig Custom_PmicGetBatteryInfo(void) {
+    PmicRegisterConfig config;
+    int data = axp2101.readRegister(0x17);
+    if(data > 0) {
+        axp2101.writeRegister(0x17,(uint8_t)(data & 0xFB)); 
+    }
+    bool is_charging = axp2101.isCharging();
+    if(is_charging) {
+        strcpy(config.isCharging, "Battery Status : Charging");
+    } else {
+        strcpy(config.isCharging, "Battery Status : Not Charging");
+    }
+    uint8_t charge_status = axp2101.getChargerStatus();
+    if (charge_status == XPOWERS_AXP2101_CHG_TRI_STATE) {
+        strcpy(config.chargeStatus, "Charging Status : Tri_Charge");
+    } else if (charge_status == XPOWERS_AXP2101_CHG_PRE_STATE) {
+        strcpy(config.chargeStatus, "Charging Status : Pre_Charge");
+    } else if (charge_status == XPOWERS_AXP2101_CHG_CC_STATE) {
+        strcpy(config.chargeStatus, "Charging Status : Constant_Charge");
+    } else if (charge_status == XPOWERS_AXP2101_CHG_CV_STATE) {
+        strcpy(config.chargeStatus, "Charging Status : Constant_Voltage");
+    } else if (charge_status == XPOWERS_AXP2101_CHG_DONE_STATE) {
+        strcpy(config.chargeStatus, "Charging Status : Charge_Done");
+    } else if (charge_status == XPOWERS_AXP2101_CHG_STOP_STATE) {
+        strcpy(config.chargeStatus, "Charging Status : Not_Charging");
+    }
+    uint16_t battery_voltage = axp2101.getBattVoltage();
+    snprintf(config.batteryVoltage, sizeof(config.batteryVoltage), "Battery Voltage : %dmV", battery_voltage);
+    int battery_percent = axp2101.getBatteryPercent();
+    snprintf(config.batteryPercent, sizeof(config.batteryPercent), "Battery Percent : %d%%", battery_percent);
+    return config;
 }

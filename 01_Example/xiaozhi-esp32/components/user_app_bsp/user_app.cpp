@@ -149,6 +149,29 @@ static void key1_button_user_Task(void *arg) {
     }
 }
 
+static void boot_button_user_Task(void *arg) {
+    ePaperDisplay.EPD_Init();
+    for (;;) {
+        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, (0x04), pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+        if(even & 0x04) { //双击
+            if (pdTRUE == xSemaphoreTake(epaper_gui_semapHandle, 2000)) {
+                xEventGroupSetBits(Green_led_Mode_queue,set_bit_button(6));
+                Green_led_arg                   = 1;
+                /*显示电池状态信息*/
+                PmicRegisterConfig pmic = Custom_PmicGetBatteryInfo();
+                ePaperDisplay.EPD_DispClear(ColorWhite);
+                ePaperDisplay.EPD_DrawStringEN(120, 180, pmic.isCharging, &Font24, ColorWhite, ColorBlack);
+                ePaperDisplay.EPD_DrawStringEN(120, 220, pmic.chargeStatus, &Font24, ColorWhite, ColorBlack);
+                ePaperDisplay.EPD_DrawStringEN(120, 260, pmic.batteryVoltage, &Font24, ColorWhite, ColorBlack);
+                ePaperDisplay.EPD_DrawStringEN(120, 300, pmic.batteryPercent, &Font24, ColorWhite, ColorBlack);
+                ePaperDisplay.EPD_Display();
+                xSemaphoreGive(epaper_gui_semapHandle); 
+                Green_led_arg = 0;
+            }
+        }
+    }
+}
+
 uint8_t User_Mode_init(void) 
 {
     epaper_gui_semapHandle = xSemaphoreCreateMutex(); /* Acquire the mutual exclusion lock to prevent re-flashing */
@@ -175,6 +198,7 @@ uint8_t User_Mode_init(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_reset_pin(GPIO_NUM_4));
     Custom_ButtonInit();
     xTaskCreate(key1_button_user_Task, "key1_button_user_Task", 4 * 1024, NULL, 3, NULL);
+    xTaskCreate(boot_button_user_Task, "boot_button_user_Task", 4 * 1024, NULL, 3, NULL);
     xTaskCreate(Green_led_user_Task, "Green_led_user_Task", 3 * 1024, &Green_led_arg, 2, NULL);
     xTaskCreate(Red_led_user_Task, "Red_led_user_Task", 3 * 1024, &Red_led_arg, 2, NULL);
     xTaskCreate(Axp2101_isChargingTask, "Axp2101_isChargingTask", 3 * 1024, NULL, 2, NULL);   //AXP2101 Charging

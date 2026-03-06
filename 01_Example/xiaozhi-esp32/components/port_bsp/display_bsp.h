@@ -66,6 +66,7 @@ class ePaperPort {
     uint8_t Rotation = 0;                          //0:0 1:90 2:180 3:270
     uint8_t mirrx = 0;                             
     uint8_t mirry = 0;
+    bool isEPDInit = false;
 
     void    Set_ResetIOLevel(uint8_t level);
     void    Set_CSIOLevel(uint8_t level);
@@ -86,6 +87,7 @@ class ePaperPort {
     void EPD_Rotate90CCW_Fast(const uint8_t* src, uint8_t* dst, int width, int height);
     void EPD_Rotate90CW_Fast(const uint8_t* src, uint8_t* dst, int width, int height);
     void EPD_PixelRotate();
+    void EPD_DrawChar(uint16_t Xpoint, uint16_t Ypoint, const char Acsii_Char,sFONT* Font, uint16_t Color_Foreground, uint16_t Color_Background);
 
   public:
     ePaperPort(ImgDecodeDither &dither,int mosi, int scl, int dc, int cs, int rst, int busy, uint16_t width, uint16_t height, uint16_t scale_MaxWidth, uint16_t scale_MaxHeight, spi_host_device_t spihost = SPI3_HOST);
@@ -103,4 +105,5 @@ class ePaperPort {
     void EPD_SDcardIMGShakingColor(const char *path,uint16_t x_start, uint16_t y_start);        /*可以显示jpg,bmp,png格式图片 480x800/800x480*/
     void EPD_SDcardScaleIMGShakingColor(const char *path,uint16_t x_start, uint16_t y_start);   /*可以显示jpg,bmp,png格式图片,带自动拉伸缩放的*/
 	void EPD_DrawStringCN(uint16_t Xstart, uint16_t Ystart, const char * pString, cFONT* font,uint16_t Color_Foreground, uint16_t Color_Background);
+    void EPD_DrawStringEN(uint16_t Xstart, uint16_t Ystart, const char * pString,sFONT* Font, uint16_t Color_Foreground, uint16_t Color_Background);
 };

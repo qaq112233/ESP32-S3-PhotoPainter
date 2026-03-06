@@ -177,6 +177,10 @@ void ePaperPort::Set_Mirror(uint8_t mirr_x,uint8_t mirr_y) {
 }
 
 void ePaperPort::EPD_Init() {
+    if(isEPDInit) {
+        ESP_LOGW(TAG, "EPD has already been initialized.");
+        return;
+    }
     EPD_Reset();
     EPD_LoopBusy();
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -245,6 +249,7 @@ void ePaperPort::EPD_Init() {
     EPD_SendCommand(0x04);
     EPD_LoopBusy();
     EPD_DispClear(ColorWhite);
+    isEPDInit = true;
 }
 
 void ePaperPort::EPD_DispClear(uint8_t color) {
@@ -771,5 +776,73 @@ void ePaperPort::EPD_Rotate90CW_Fast(const uint8_t* src, uint8_t* dst, int width
             EPD_SetPixel4(dst, height, nx0, ny0, p0);
             EPD_SetPixel4(dst, height, nx1, ny1, p1);
         }
+    }
+}
+
+void ePaperPort::EPD_DrawChar(uint16_t Xpoint, uint16_t Ypoint, const char Acsii_Char,sFONT* Font, uint16_t Color_Foreground, uint16_t Color_Background) {
+    uint16_t Page, Column;
+
+    if (Xpoint > width_ || Ypoint > height_) {
+        ESP_LOGE(TAG,"Paint_DrawChar Input exceeds the normal display range");
+        return;
+    }
+
+    uint32_t Char_Offset = (Acsii_Char - ' ') * Font->Height * (Font->Width / 8 + (Font->Width % 8 ? 1 : 0));
+    const unsigned char *ptr = &Font->table[Char_Offset];
+
+    for (Page = 0; Page < Font->Height; Page ++ ) {
+        for (Column = 0; Column < Font->Width; Column ++ ) {
+
+            //To determine whether the font background color and screen background color is consistent
+            if (0XFF == Color_Background) { //this process is to speed up the scan
+                if (*ptr & (0x80 >> (Column % 8)))
+                    EPD_SetPixel(Xpoint + Column, Ypoint + Page, Color_Foreground);
+                    // Paint_DrawPoint(Xpoint + Column, Ypoint + Page, Color_Foreground, DOT_PIXEL_DFT, DOT_STYLE_DFT);
+            } else {
+                if (*ptr & (0x80 >> (Column % 8))) {
+                    EPD_SetPixel(Xpoint + Column, Ypoint + Page, Color_Foreground);
+                    // Paint_DrawPoint(Xpoint + Column, Ypoint + Page, Color_Foreground, DOT_PIXEL_DFT, DOT_STYLE_DFT);
+                } else {
+                    EPD_SetPixel(Xpoint + Column, Ypoint + Page, Color_Background);
+                    // Paint_DrawPoint(Xpoint + Column, Ypoint + Page, Color_Background, DOT_PIXEL_DFT, DOT_STYLE_DFT);
+                }
+            }
+            //One pixel is 8 bits
+            if (Column % 8 == 7)
+                ptr++;
+        }// Write a line
+        if (Font->Width % 8 != 0)
+            ptr++;
+    }// Write all
+}
+
+void ePaperPort::EPD_DrawStringEN(uint16_t Xstart, uint16_t Ystart, const char * pString,sFONT* Font, uint16_t Color_Foreground, uint16_t Color_Background) {
+    uint16_t Xpoint = Xstart;
+    uint16_t Ypoint = Ystart;
+
+    if (Xstart > width_ || Ystart > height_) {
+        ESP_LOGE(TAG,"Paint_DrawString_EN Input exceeds the normal display range");
+        return;
+    }
+
+    while (* pString != '\0') {
+        //if X direction filled , reposition to(Xstart,Ypoint),Ypoint is Y direction plus the Height of the character
+        if ((Xpoint + Font->Width ) > width_ ) {
+            Xpoint = Xstart;
+            Ypoint += Font->Height;
+        }
+
+        // If the Y direction is full, reposition to(Xstart, Ystart)
+        if ((Ypoint  + Font->Height ) > height_ ) {
+            Xpoint = Xstart;
+            Ypoint = Ystart;
+        }
+        EPD_DrawChar(Xpoint, Ypoint, * pString, Font, Color_Background, Color_Foreground);
+
+        //The next character of the address
+        pString ++;
+
+        //The next word of the abscissa increases the font of the broadband
+        Xpoint += Font->Width;
     }
 }

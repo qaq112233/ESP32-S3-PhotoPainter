@@ -9,8 +9,9 @@ idf_component_register(
     "./codec_bsp.cpp"
     "./i2c_equipment.cpp"
     "./src/fonts/font14CN.c"
-    "./src/fonts/font18CN.c" 
+    "./src/fonts/font18CN.c"
     "./src/fonts/font22CN.c"
+    "./src/fonts/font24.c"
     "traverse_nvs.cpp"
     PRIV_REQUIRES 
     nvs_flash

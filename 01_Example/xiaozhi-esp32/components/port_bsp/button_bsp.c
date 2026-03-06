@@ -30,19 +30,11 @@ static void on_boot_single_click(Button *btn_handle) {
 }
 
 static void on_boot_double_click(Button *btn_handle) {
-    //xEventGroupSetBits(BootButtonGroups, set_bit_button(1));
+    xEventGroupSetBits(BootButtonGroups, set_bit_button(2));
 }
 
 static void on_boot_long_press_start(Button *btn_handle) {
     xEventGroupSetBits(BootButtonGroups, set_bit_button(1));
-}
-
-static void on_boot_press_repeat(Button *btn_handle) {
-    xEventGroupSetBits(BootButtonGroups, set_bit_button(2));
-}
-
-static void on_boot_press_up(Button *btn_handle) {
-    xEventGroupSetBits(BootButtonGroups, set_bit_button(3));
 }
 
 static void on_pwr_single_click(Button *btn_handle) {
@@ -106,8 +98,6 @@ void Custom_ButtonInit(void) {
     button_attach(&BootButton, BTN_SINGLE_CLICK, on_boot_single_click);         // Single click event
     button_attach(&BootButton, BTN_DOUBLE_CLICK, on_boot_double_click);         // Double click event
     button_attach(&BootButton, BTN_LONG_PRESS_START, on_boot_long_press_start); // Long press event
-    button_attach(&BootButton, BTN_PRESS_UP, on_boot_press_up);                 //Release event
-    button_attach(&BootButton, BTN_PRESS_REPEAT, on_boot_press_repeat);         //Continuous click event
     
     button_init(&PWRButton, read_button_GPIO, PWR_Active, PWR_ID);           
     button_attach(&PWRButton, BTN_SINGLE_CLICK, on_pwr_single_click);         
