@@ -9,6 +9,9 @@
 
 ## Change log
 
+### [1.3.1] 2026/03/10
+- Add Arduino sample code for audio playback and recording.
+
 ### [1.3.0] 2026/02/26
 - In Mode 3, long press the BOOT button under any circumstance to enter network configuration.
 - Set the constant current charging to 500mA to reduce charging time.
@@ -37,6 +40,9 @@
 
 ## 更新日志
 
+### [1.3.1] 2026/03/10
+- 添加播放和录音的arduino示例代码
+ 
 ### [1.3.0] 2026/02/26
 - 在模式3下，任何情况下长按BOOT按键可进入配网
 - 恒流充电电流设置成500mA，缩减充电时间
