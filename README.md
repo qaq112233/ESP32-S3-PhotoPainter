@@ -9,6 +9,13 @@
 
 ## Change log
 
+### [1.4.0] 2026/04/02
+- Add Arduino example code for audio playback and recording.
+- The PWR button no longer triggers low-power mode; it is only used for power on and power off.
+- Double-click the BOOT button to display battery information; long-press the BOOT button to enter sleep mode, effective in any mode.
+- In Mode 2, if STA mode setup fails, wait for the PWR LED to turn on, then single-click the BOOT button to switch back to AP mode.
+- In Mode 3, a single-click of the BOOT button enters network configuration under any condition.
+
 ### [1.3.1] 2026/03/10
 - Add Arduino sample code for audio playback and recording.
 
@@ -39,6 +46,13 @@
 - Fixed the display anomaly where the device screen presents a blank screen when the TF card image reading operation fails.
 
 ## 更新日志
+
+### [1.4.0] 2026/04/02
+- 添加播放和录音的arduino示例代码
+- PWR按键不再作用于进入低功耗模式，PWR按键只有开机和关机两个功能
+- 双击BOOT按键显示电池信息，长按BOOT按键进入睡眠模式，作用于任何模式
+- 模式二下，如果STA模式设置失败，可以等待PWR灯亮起，单击BOOT按键切换回AP模式
+- 模式三下，任何情况下单击BOOT按键可进入配网
 
 ### [1.3.1] 2026/03/10
 - 添加播放和录音的arduino示例代码

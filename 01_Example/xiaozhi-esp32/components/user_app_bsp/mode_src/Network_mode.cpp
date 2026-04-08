@@ -126,10 +126,10 @@ static void get_wakeup_gpio(void) {
     }
 }
 
-static void pwr_button_user_Task(void *arg) {
+static void boot_button_long_press_Task(void *arg) {
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(PWRButtonGroups, set_bit_all, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (get_bit_button(even, 0)) {
+        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, GroupBit1, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+        if (even & GroupBit1) {
             const uint64_t ext_wakeup_pin_3_mask = 1ULL << ext_wakeup_pin_3;
             ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_LOW)); 
             ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(ext_wakeup_pin_3));
@@ -142,10 +142,10 @@ static void pwr_button_user_Task(void *arg) {
     }
 }
 
-static void boot_button_user_Task(void *arg) {
+static void boot_button_click_Task(void *arg) {
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, GroupBit1, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (even & GroupBit1) {
+        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, GroupBit0, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+        if (even & GroupBit0) {      // 单击 切换回AP模式
             Set_nvsNetworkMode(0);
             esp_restart();
         }
@@ -159,12 +159,12 @@ void User_Network_mode_app_init(void) {
         wifi_credential_t creden = nvs_viewer->Get_WifiCredentialFromNVS();
         if(0 == creden.is_valid) {
             xEventGroupSetBits(Red_led_Mode_queue,GroupBit1); 
-            xTaskCreate(boot_button_user_Task, "boot_button_user_Task", 6 * 1024, NULL, 3, NULL);
+            xTaskCreate(boot_button_click_Task, "boot_button_click_Task", 6 * 1024, NULL, 3, NULL);
             return;
         }
         uint8_t res = ServerPort_NetworkSTAInit(creden); 
         if(0 == res) {
-            xTaskCreate(boot_button_user_Task, "boot_button_user_Task", 6 * 1024, NULL, 3, NULL);
+            xTaskCreate(boot_button_click_Task, "boot_button_click_Task", 6 * 1024, NULL, 3, NULL);
             return;
         }
         Mdns_init_config();
@@ -178,6 +178,6 @@ void User_Network_mode_app_init(void) {
     xEventGroupSetBits(Red_led_Mode_queue,set_bit_button(0)); 
     xTaskCreate(Network_user_Task, "Network_user_Task", 6 * 1024, NULL, 2, NULL);
     if(!NetWorkMode) {xTaskCreate(Network_sleep_Task, "Network_sleep_Task", 4 * 1024, NULL, 2, NULL);}
-    xTaskCreate(pwr_button_user_Task, "pwr_button_user_Task", 4 * 1024, NULL, 2, NULL);
+    xTaskCreate(boot_button_long_press_Task, "boot_button_user_Task", 4 * 1024, NULL, 2, NULL);
     get_wakeup_gpio(); 
 }

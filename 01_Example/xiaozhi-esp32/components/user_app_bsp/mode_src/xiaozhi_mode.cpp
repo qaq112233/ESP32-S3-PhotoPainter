@@ -238,10 +238,10 @@ void key_wakeUp_user_Task(void *arg) {
     }
 }
 
-void pwr_sleep_user_Task(void *arg) {
+void bool_long_press_sleep_Task(void *arg) {
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(PWRButtonGroups, (0x01), pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (even & 0x01) {
+        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, (0x02), pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+        if (even & 0x02) { // 长按进入睡眠
             xEventGroupSetBits(ai_IMG_Group, 0x08);
             gpio_set_level((gpio_num_t) 45, 1); 
         }
@@ -292,5 +292,5 @@ void User_xiaozhi_app_init(void)                        // Initialization in the
     xTaskCreate(ai_IMG_Task, "ai_IMG_Task", 6 * 1024, str_ai_chat_buff, 2, NULL);
     xTaskCreate(ai_IMG_LoopTask, "ai_IMG_LoopTask", 4 * 1024, NULL, 2, NULL);
     xTaskCreate(key_wakeUp_user_Task, "key_wakeUp_user_Task", 4 * 1024, NULL, 3, NULL); 
-    xTaskCreate(pwr_sleep_user_Task, "pwr_sleep_user_Task", 4 * 1024, NULL, 3, NULL); 
+    xTaskCreate(bool_long_press_sleep_Task, "bool_long_press_sleep_Task", 4 * 1024, NULL, 3, NULL); 
 }

@@ -11,8 +11,7 @@
 #include "list.h"
 
 
-#define ext_wakeup_pin_1 GPIO_NUM_0 
-#define ext_wakeup_pin_2 GPIO_NUM_5 
+#define ext_wakeup_pin_1 GPIO_NUM_0
 #define ext_wakeup_pin_3 GPIO_NUM_4 
 
 static RTC_DATA_ATTR uint32_t sdcard_Basic_count = 0; 
@@ -22,31 +21,12 @@ static SemaphoreHandle_t sleep_Semp;          // Binary call low-power task
 static uint8_t           wakeup_basic_flag = 0;
 static list_t* ListHost;
 
-
-static void pwr_button_user_Task(void *arg) {
-    for (;;) {
-        EventBits_t even = xEventGroupWaitBits(PWRButtonGroups, set_bit_all, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (get_bit_button(even, 0))
-        {
-            const uint64_t ext_wakeup_pin_1_mask = 1ULL << ext_wakeup_pin_1;
-            const uint64_t ext_wakeup_pin_3_mask = 1ULL << ext_wakeup_pin_3;
-            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(ext_wakeup_pin_1_mask | ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_LOW)); 
-            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(ext_wakeup_pin_3));
-            ESP_ERROR_CHECK(rtc_gpio_pullup_en(ext_wakeup_pin_3));
-            esp_sleep_enable_timer_wakeup((uint64_t)basic_rtc_set_time * 1000000ULL);
-            //axp_basic_sleep_start();
-            vTaskDelay(pdMS_TO_TICKS(500));
-            esp_deep_sleep_start(); 
-        }
-    }
-}
-
 static void boot_button_user_Task(void *arg) {
     uint8_t *wakeup_arg = (uint8_t *) arg;
     ePaperDisplay.EPD_Init();
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, 0x01, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (get_bit_button(even, 0)) {
+        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, (0x01) | (0x02) , pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
+        if (get_bit_button(even, 0)) { //单击
             if (*wakeup_arg == 0) {
                 if (pdTRUE == xSemaphoreTake(epaper_gui_semapHandle, 2000)) {                       
                     list_node_t *sdcard_node = list_at(ListHost, sdcard_Basic_count); 
@@ -69,6 +49,18 @@ static void boot_button_user_Task(void *arg) {
                     }
                 }
             }
+        } else if(even & 0x02) { //长按 低功耗
+            const uint64_t ext_wakeup_pin_1_mask = 1ULL << ext_wakeup_pin_1;
+            const uint64_t ext_wakeup_pin_3_mask = 1ULL << ext_wakeup_pin_3;
+            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(ext_wakeup_pin_1_mask | ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_LOW)); 
+            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(ext_wakeup_pin_3));
+            ESP_ERROR_CHECK(rtc_gpio_pullup_en(ext_wakeup_pin_3));
+            esp_sleep_enable_timer_wakeup((uint64_t)basic_rtc_set_time * 1000000ULL);
+            //axp_basic_sleep_start();
+            do {
+                vTaskDelay(pdMS_TO_TICKS(50));
+            } while (gpio_get_level(ext_wakeup_pin_1) == 0);
+            esp_deep_sleep_start();
         }
     }
 }
@@ -122,7 +114,6 @@ void User_Basic_mode_app_init(void) {
     SDPort->SDPort_ScanListDir("/sdcard/06_user_foundation_img"); 
     ESP_LOGW("IMG","Values:%d",SDPort->Get_Sdcard_ImgValue());  
     xTaskCreate(boot_button_user_Task, "boot_button_user_Task", 6 * 1024, &wakeup_basic_flag, 3, NULL);
-    xTaskCreate(pwr_button_user_Task, "pwr_button_user_Task", 4 * 1024, NULL, 3, NULL);
     xTaskCreate(default_sleep_user_Task, "default_sleep_user_Task", 4 * 1024, &Basic_sleep_arg, 3, NULL); 
     get_wakeup_gpio();
 }
