@@ -78,10 +78,21 @@ private:
     size_t photo_index_ = 0;
     int http_status_ = 0;
     bool io_started_ = false, sync_allowed_ = false, upload_open_ = false, upload_display_ = false;
-    bool in_maintenance_ = false, recovery_pending_ = false;
+    bool in_maintenance_ = false, recovery_pending_ = false, candidate_known_ = false;
     size_t upload_bytes_ = 0;
     int64_t next_poll_ = 0, round_deadline_ = 0, operation_deadline_ = 0, mirror_retry_ = 0;
-    int64_t upload_activity_ = 0, stats_at_ = 0;
+    int64_t upload_activity_ = 0, stats_at_ = 0, cleanup_retry_ = 0;
+
+    void CleanupPending() {
+        const auto& r = store_.recovery();
+        // At boot, wait for an accepted 200/304 before deciding which orphan
+        // files belong to a retryable candidate. Never collect during a write.
+        if (!candidate_known_ || writer_.open() || !r.complete || r.mirror_pending ||
+            r.has_newer_incomplete || !r.gc_pending || Now() < cleanup_retry_) return;
+        const auto status = store_.GarbageCollect(&candidate_);
+        cleanup_retry_ = Now() + 30000;
+        if (status != StoreStatus::kOk) ESP_LOGW(TAG, "Library cleanup deferred (%s)", Store::StatusString(status));
+    }
 
     void Maintenance() {
         if (stopping || !ready || in_maintenance_) return;
@@ -174,7 +185,9 @@ private:
                 bool mirrored = false, gc = false;
                 store_.RepairMirror(&mirrored, &gc);
                 mirror_retry_ = Now() + 30000;
+                if (gc) cleanup_retry_ = Now() + 30000;
             }
+            if (phase_ == Phase::Idle) CleanupPending();
             if (phase_ == Phase::Idle && sync_allowed_ && connected && Now() >= next_poll_ &&
                 !(store_.recovery().complete && store_.recovery().mirror_pending)) BeginSync();
             if (Now() >= stats_at_) {
@@ -304,13 +317,23 @@ private:
             if (!checked.complete || checked.has_newer_incomplete || checked.snapshot.source != source_) {
                 FailSync(); return;
             }
+            candidate_ = checked.snapshot.manifest;
+            candidate_known_ = true;
             CompleteSync(); return;
         }
-        if (http_status_ != 200 || !ParseManifestJson(manifest_body_.data(), manifest_body_.size(), &candidate_, config.default_display_interval_sec).ok()) {
+        Manifest proposed;
+        CandidatePlan plan;
+        if (http_status_ != 200 || !ParseManifestJson(manifest_body_.data(), manifest_body_.size(), &proposed, config.default_display_interval_sec).ok()) {
             FailSync(); return;
         }
-        auto status = store_.PlanCandidate(candidate_, source_, &candidate_plan_);
+        auto status = store_.PlanCandidate(proposed, source_, &plan);
         if (status != StoreStatus::kOk) { FailSync(); return; }
+        candidate_ = std::move(proposed);
+        candidate_plan_ = std::move(plan);
+        candidate_known_ = true;
+        // Reclaim interrupted cleanup before testing capacity, retaining the
+        // accepted candidate's SHA files so failed downloads remain reusable.
+        CleanupPending();
         uint64_t total, available;
         // Retain all current data and enough space for snapshots and one manual upload.
         if (esp_vfs_fat_info("/sdcard", &total, &available) != ESP_OK ||

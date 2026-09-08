@@ -16,7 +16,7 @@ idf.py -B build-full -D SDKCONFIG="$PWD/build-full/sdkconfig" build
 
 ## 主机测试
 
-统一 CTest 包含 7 组测试；除真实证书使用的固定 mbedTLS 库外，生产逻辑测试启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。
+统一 CTest 包含 10 组测试；除真实证书使用的固定 mbedTLS 库外，生产逻辑测试启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。
 
 | 测试 | 直接验证的代码与范围 |
 | --- | --- |
@@ -26,24 +26,36 @@ idf.py -B build-full -D SDKCONFIG="$PWD/build-full/sdkconfig" build
 | store_fault_test | 生产协议解析与双快照存储、版本限制、ETag、损坏恢复 |
 | storage_recovery_test | 文件操作前后故障注入、恢复照片集合、50 ID/3 SHA、镜像再校验、旧完整库回退且保留新版本修复依据、配置容量、命名空间隔离 |
 | network_protocol_test | 生产上传分帧和静态文件白名单；不是 ESP32 Wi-Fi 驱动测试 |
+| basic_timer_test | 生产 Basic 定时解析：整数下限/上限、小数、非有限数、非法类型、损坏 JSON 和默认值 |
+| manager_integration_test | 生产管理循环：200/304 后清理、空间检查前回收、30 秒重试、候选图片复用、活动写入保护；生产显示缓冲验证横竖图后的电池页面一致 |
+| wifi_maintenance_test | 生产 Wi-Fi 回调与维护任务：合并事件按最新状态处理，覆盖断开/获得 IP 两种顺序 |
 | tls_identity_test | 固定版本 mbedTLS 解析真实证书，验证 IPv4/IPv6 IP SAN，拒绝错误 IP、仅 CN 和数字 DNS SAN |
+
+管理循环和 Wi-Fi 集成测试以主机桩替代 RTOS、网络、GPIO/SPI 等边界；它们验证生产状态机和显示缓冲，不模拟真实任务竞争或硬件电源。
 
 证书测试不等同于设备上的完整 HTTPS 握手测试。存储故障测试使用内存文件系统和图片校验回调，不能代替真实 FatFS/SD 控制器掉电测试。详细场景见 [storage-validation.md](storage-validation.md)、[network-validation.md](network-validation.md)、[display-validation.md](display-validation.md)。
 
 ## 构建结果
 
-最终源码的两种构建均通过，7/7 主机测试通过（19.27 秒），`git diff --check` 通过。
+最终源码的两种构建均通过，10/10 主机测试通过（18.60 秒），`git diff --check` 通过。
 
 | 构建 | 应用镜像 | OTA 槽剩余 | 结果 |
 | --- | --- | --- | --- |
-| Lite | 1,295,216 字节 | 2,833,552 字节 | 通过 |
-| Full | 4,049,616 字节 | 79,152 字节 | 通过 |
+| Lite | 1,296,528 字节 | 2,832,240 字节 | 通过 |
+| Full | 4,050,912 字节 | 77,856 字节 | 通过 |
 
-Lite 低于 3,604,480 字节门槛，保留超过 512 KiB 的分区空间。Full 仍能放入原分区，但剩余约 77 KiB，构建器提示接近分区上限；这不影响 Lite 的验收门槛。两种配置都已核对外部内存启用、Octal 模式和 80 MHz。
+Lite 低于 3,604,480 字节门槛，保留超过 512 KiB 的分区空间。Full 仍能放入原分区，但剩余约 76 KiB，构建器提示接近分区上限；这不影响 Lite 的验收门槛。两种配置都已核对外部内存启用、Octal 模式和 80 MHz。
 
 Lite 实际组件图中没有 codec、ESP-SR、LVGL、MQTT、摄像头和 Opus 组件，链接符号也不含小智 Application、CodecPort 或 MQTT 初始化入口。Basic 图片解码、EPD 状态字体、Wi-Fi/AP 上传和 PhotoPull 仍在 Lite 中。项目上下文检查通过；在 Lite 依赖图中，检查器对未下载的 Full 专属组件给出提示属于裁剪预期。
 
-最近日志：`validation-logs/lite-build.log`、`validation-logs/full-build.log`、`validation-logs/host-results.log`。构建产物位于 `build-lite/` 与 `build-full/`，没有复制到发布目录。
+最近日志：`validation-logs/review-fixes-lite-build.log`、`validation-logs/review-fixes-full-build.log`、`validation-logs/review-fixes-host-results.log`。构建产物位于 `build-lite/` 与 `build-full/`，没有复制到发布目录。
+
+## 2026-09-08 审查修复
+
+- 为双槽完整一致但清理未完成的状态补充重试。重启后先等待有效 200/304 确认候选引用，再清理旧残留；保留候选 SHA 文件、拒绝用非法清单替换保留集合，并在空间预检前尝试回收。失败后在空闲时每隔至少 30 秒重试，活动图片写入期间不清理。
+- 运行期联网状态仅由 Wi-Fi 回调更新；维护任务读取最新状态，避免无序事件位把“刚恢复连接”覆盖成断开。
+- 清屏后恢复固定横版画布；照片加载再设置照片自身方向，使电池/文字页面不继承前一张竖版照片的行宽。
+- Basic 的 timer 仅接受 1～UINT32_MAX 的整数秒数；小数、非有限数、非法字段或损坏 JSON 回退到原有 780 秒默认值。
 
 ## 尚未执行的硬件验收
 

@@ -1,6 +1,7 @@
 set(USER_APP_BSP_SOURCES
   "mode_src/Network_mode.cpp"
   "mode_src/Basic_mode.cpp"
+  "mode_src/basic_timer.cpp"
   "mode_src/Mode_Selection.cpp"
   "user_app.cpp")
 if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)

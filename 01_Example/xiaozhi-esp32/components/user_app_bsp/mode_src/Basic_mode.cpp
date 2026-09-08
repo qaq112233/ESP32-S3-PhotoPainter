@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <cJSON.h>
+#include "basic_timer.h"
 #include "user_app.h"
 #include "button_bsp.h"
 #include "list.h"
@@ -29,8 +29,8 @@ static list_t* ListHost;
  * local display setting and must not depend on the AI configuration parser.
  * Missing, malformed or non-positive values retain the legacy default. */
 static uint32_t load_basic_timer_seconds(void) {
-    static const uint32_t kDefaultTimerSeconds = 13U * 60U;
-    static const size_t kMaxConfigSize = 8U * 1024U;
+    constexpr uint32_t kDefaultTimerSeconds = photopainter::kDefaultBasicTimerSeconds;
+    constexpr size_t kMaxConfigSize = photopainter::kMaxBasicConfigSize;
     const char *path = "/sdcard/06_user_foundation_img/config.txt";
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
@@ -60,19 +60,8 @@ static uint32_t load_basic_timer_seconds(void) {
     }
     contents[bytes_read] = '\0';
 
-    cJSON *root = cJSON_ParseWithLength(contents, bytes_read);
+    const uint32_t result = photopainter::ParseBasicTimerSeconds(contents, bytes_read);
     free(contents);
-    if (root == NULL) {
-        ESP_LOGW("TIMER", "Basic timer config is invalid; using default");
-        return kDefaultTimerSeconds;
-    }
-
-    cJSON *timer = cJSON_GetObjectItemCaseSensitive(root, "timer");
-    uint32_t result = kDefaultTimerSeconds;
-    if (cJSON_IsNumber(timer) && timer->valuedouble > 0.0 && timer->valuedouble <= UINT32_MAX) {
-        result = (uint32_t)timer->valuedouble;
-    }
-    cJSON_Delete(root);
     return result;
 }
 

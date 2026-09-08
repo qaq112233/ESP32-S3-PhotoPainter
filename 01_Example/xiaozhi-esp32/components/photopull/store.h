@@ -161,7 +161,9 @@ public:
     // Retry a previously failed mirror.  GC runs only after both slots have
     // been verified to reference the same complete snapshot.
     StoreStatus RepairMirror(bool* mirrored, bool* gc_pending);
-    StoreStatus GarbageCollect();
+    // Keep verified candidate files across failed rounds while collecting old
+    // committed files. Call only with no active image writer.
+    StoreStatus GarbageCollect(const Manifest* retained_candidate = nullptr);
 
     StoreStatus CheckPhoto(const PhotoEntry& expected, bool* valid);
     StoreStatus ValidateSnapshot(const std::string& path, SnapshotInfo* out);

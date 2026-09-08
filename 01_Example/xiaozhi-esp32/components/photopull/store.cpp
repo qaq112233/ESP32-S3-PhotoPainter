@@ -850,8 +850,9 @@ bool Store::IsManagedImageName(const std::string& path, std::string* suffix,
     return true;
 }
 
-StoreStatus Store::GarbageCollect() {
+StoreStatus Store::GarbageCollect(const Manifest* retained_candidate) {
     if (fs_ == nullptr) return StoreStatus::kInvalidArgument;
+    recovery_.gc_pending = true;
     SlotRecord a, b;
     if (ReadSlot(0, &a) != StoreStatus::kOk || ReadSlot(1, &b) != StoreStatus::kOk ||
         !a.structural_valid || !b.structural_valid || !a.complete || !b.complete ||
@@ -861,6 +862,12 @@ StoreStatus Store::GarbageCollect() {
     std::vector<std::string> keep;
     keep.reserve(a.snapshot.manifest.photos.size());
     for (size_t i = 0; i < a.snapshot.manifest.photos.size(); ++i) keep.push_back(a.snapshot.manifest.photos[i].sha256);
+    if (retained_candidate != nullptr) {
+        for (const auto& photo : retained_candidate->photos) {
+            if (!IsValidManagedSha256(photo.sha256)) return StoreStatus::kInvalidArgument;
+            keep.push_back(photo.sha256);
+        }
+    }
     for (size_t i = 0; i < paths.size(); ++i) {
         std::string suffix, digest;
         if (!IsManagedImageName(paths[i], &suffix, &digest)) continue;  // Preserve unknown files.
@@ -878,6 +885,7 @@ StoreStatus Store::GarbageCollect() {
         if (fs_->StatFile(temp, &temp_size) && !fs_->Remove(temp)) return StoreStatus::kIoError;
     }
     if (!fs_->SyncDirectory(kManagedDirectory)) return StoreStatus::kIoError;
+    recovery_.gc_pending = false;
     return StoreStatus::kOk;
 }
 

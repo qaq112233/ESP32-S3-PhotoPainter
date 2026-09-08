@@ -22,6 +22,25 @@ photopull_test(store_fault_test ../core.cpp ../store.cpp store_fault_test.cpp)
 photopull_test(storage_recovery_test ../core.cpp ../store.cpp storage_recovery_test.cpp)
 photopull_test(network_protocol_test ../../app_bsp/tests/network_validation_host_test.cpp)
 
+find_path(CJSON_INCLUDE_DIR cJSON.h PATH_SUFFIXES cjson REQUIRED)
+find_library(CJSON_LIBRARY cjson REQUIRED)
+photopull_test(basic_timer_test ../../user_app_bsp/mode_src/basic_timer.cpp
+               ../../user_app_bsp/tests/basic_timer_test.cpp)
+target_include_directories(basic_timer_test PRIVATE "${CJSON_INCLUDE_DIR}")
+target_link_libraries(basic_timer_test PRIVATE "${CJSON_LIBRARY}")
+
+photopull_test(manager_integration_test manager_integration_test.cpp
+               ../core.cpp ../store.cpp ../carousel.cpp ../fatfs_store.cpp ../bmp_validator.cpp
+               ../../port_bsp/display_bsp.cpp ../../port_bsp/src/fonts/font24.c)
+photopull_test(wifi_maintenance_test ../../app_bsp/tests/wifi_maintenance_host_test.cpp)
+foreach(adapter_test manager_integration_test wifi_maintenance_test)
+    target_include_directories(${adapter_test} PRIVATE host_stubs ../../port_bsp
+                               ../../port_bsp/src/fonts ../../app_bsp)
+    target_compile_options(${adapter_test} PRIVATE -ffunction-sections -fdata-sections
+                           -Wno-unused-parameter -Wno-sign-compare)
+    target_link_options(${adapter_test} PRIVATE -Wl,--gc-sections)
+endforeach()
+
 set(MBEDTLS_SOURCE_DIR "" CACHE PATH "Pinned ESP-IDF mbedTLS source for real-certificate identity tests")
 if(MBEDTLS_SOURCE_DIR)
     set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)

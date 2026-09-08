@@ -363,6 +363,11 @@ esp_err_t ePaperPort::EPD_Init() {
 
 esp_err_t ePaperPort::EPD_DispClearLocked(uint8_t color) {
     if (DispBuffer == NULL) return ESP_ERR_INVALID_STATE;
+    // Clearing starts a native landscape canvas for text/pixel drawing.
+    // A subsequently loaded photo sets its own geometry in EPD_ParseBMPImage.
+    src_width = width_;
+    src_height = height_;
+    Rotation = 2;
     color &= 0x0F;
     memset(DispBuffer, (color << 4) | color, DisplayLen);
     return ESP_OK;

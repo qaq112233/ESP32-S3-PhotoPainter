@@ -304,20 +304,15 @@ static void wifi_maintenance_task(void *arg) {
                 ESP_LOGI(TAG, "Maintenance AP enabled by user");
             }
         }
-        if (bits & WIFI_EVENT_STA_GOT_IP_BIT) {
-            s_sta_connected = true;
-            s_retry_delay_ms = WIFI_RETRY_INITIAL_MS;
-            photopull_network_changed(true);
-            stop_fallback_ap_if_unused();
-        }
-        if (bits & WIFI_EVENT_STA_DISCONNECTED_BIT) {
+        // Event bits only wake this task; they do not preserve event order.
+        // The callback is the single writer of live STA/PhotoPull state.
+        if (bits & (WIFI_EVENT_STA_GOT_IP_BIT | WIFI_EVENT_STA_DISCONNECTED_BIT)) {
             if (s_sta_connected) {
-                s_sta_connected = false;
-                photopull_network_changed(false);
-            }
-            schedule_sta_retry(now);
-            if (s_auto_fallback_ap) {
-                start_fallback_ap();
+                s_retry_delay_ms = WIFI_RETRY_INITIAL_MS;
+                stop_fallback_ap_if_unused();
+            } else {
+                schedule_sta_retry(now);
+                if (s_auto_fallback_ap) start_fallback_ap();
             }
         }
         stop_fallback_ap_if_unused();

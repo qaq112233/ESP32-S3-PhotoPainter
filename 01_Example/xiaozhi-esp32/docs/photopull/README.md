@@ -36,6 +36,8 @@ idf.py -B build-lite build
 
 ## 主机测试
 
+需要 C/C++ 编译器、CMake、OpenSSL 和 cJSON 开发库（Debian/Ubuntu 为 `libcjson-dev`）。
+
 ```sh
 cmake -S components/photopull/tests -B build-host-tests \
   -DMBEDTLS_SOURCE_DIR=/home/PhotoPainter/toolchains/esp-idf/components/mbedtls/mbedtls \
@@ -43,5 +45,7 @@ cmake -S components/photopull/tests -B build-host-tests \
 cmake --build build-host-tests -j 4
 ctest --test-dir build-host-tests --output-on-failure
 ```
+
+管理任务与 Wi-Fi 集成测试直接编译生产代码，以主机桩替代 ESP 网络、RTOS 和 GPIO/SPI 边界；电池页面测试比较真实显示缓冲，不代表物理屏幕验证。
 
 主机测试默认启用地址和未定义行为检查；真实证书测试使用同版本 mbedTLS 和临时生成的证书。存储测试模拟文件操作前后的中断并在恢复后检查图片集合；真实 SD 控制器掉电、BUSY/SPI 故障、实际电源行为与 24 小时常驻仍需单独的硬件测试。

@@ -122,6 +122,7 @@ class ePaperPort {
     bool Ready() const { return init_error_ == ESP_OK && spi_device_added_; }
 
     esp_err_t EPD_Init();
+    // Clear and reset to the fixed landscape layout used by status/text pages.
     esp_err_t EPD_DispClear(uint8_t color);
     esp_err_t EPD_Display();
     esp_err_t EPD_SrcDisplayCopy(uint8_t *buffer,uint32_t len,uint32_t addlen);

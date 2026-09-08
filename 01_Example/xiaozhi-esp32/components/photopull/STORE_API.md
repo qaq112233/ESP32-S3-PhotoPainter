@@ -24,12 +24,16 @@ is:
    Pass `defer_mirror=true` when the manager must return immediately after that
    point; call `RepairMirror` from a later bounded work unit. The default keeps
    the host tests convenient by attempting the mirror inline.
-5. `GarbageCollect` is called only by `RepairMirror`/`Commit` after both slots
-   are verified to contain the same complete snapshot. `mirror_pending` means
-   the second snapshot slot still needs repair; `gc_pending` may additionally
-   indicate retained candidate files or a cleanup failure. Candidate files do
-   not block a later commit. Unknown files, and names outside the managed
-   directory even when they look like SHA names, are retained.
+5. `GarbageCollect` revalidates both slots as the same complete snapshot before
+   deleting anything. `RepairMirror`/`Commit` invoke it after mirroring. The
+   manager also retries `gc_pending` while idle, with 30 seconds between failed
+   attempts, and before the next candidate's free-space check. On startup it
+   first waits for an accepted 200/304 so it can retain the candidate's SHA
+   files using `GarbageCollect(&candidate)`; rejected manifests do not replace
+   that retention set. Active image writers prevent collection. `mirror_pending`
+   means the peer slot still needs repair. Unknown files and files outside the
+   managed directory are always retained. Cleanup success clears `gc_pending`;
+   a failure leaves it set for a later retry.
 
 When the newest structurally valid slot has a missing image but an older slot
 is complete, `Recover` selects the complete slot for offline playback and
