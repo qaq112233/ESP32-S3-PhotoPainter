@@ -87,7 +87,6 @@ void xiaozhi_ai_Message(const char *arg1, const char *arg2) //ai chat
 
 static void gui_user_Task(void *arg) {
     int *sdcard_doc = (int *) arg;
-    ePaperDisplay.EPD_Init();
     for (;;) {
         EventBits_t even = xEventGroupWaitBits(epaper_groups, set_bit_all, pdTRUE, pdFALSE, portMAX_DELAY); 
         if (pdTRUE == xSemaphoreTake(epaper_gui_semapHandle, 2000)) {

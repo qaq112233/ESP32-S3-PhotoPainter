@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
     char ssid[33];      // The maximum length of WiFi SSID is 32, with an additional 1 character for the end symbol.
@@ -12,8 +14,8 @@ class TraverseNvs
 private:
     const char *TAG = "NVS_VIEWER";
 
-    void parse_sta_ssid_blob(const uint8_t *blob_data, size_t blob_len, char *out_ssid);
-    void parse_sta_pswd_blob(const uint8_t *blob_data, size_t blob_len, char *out_password);
+    bool parse_sta_ssid_blob(const uint8_t *blob_data, size_t blob_len, char *out_ssid);
+    bool parse_sta_pswd_blob(const uint8_t *blob_data, size_t blob_len, char *out_password);
 public:
     TraverseNvs();
     ~TraverseNvs();

@@ -1,6 +1,10 @@
 tmp/
 managed_components/
 build/
+build-lite/
+build-full/
+build-host-tests/
+validation-logs/
 .vscode/
 .devcontainer/
 sdkconfig.old

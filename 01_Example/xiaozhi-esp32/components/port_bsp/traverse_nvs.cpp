@@ -2,6 +2,7 @@
 #include <freertos/FreeRTOS.h>
 #include <nvs.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "traverse_nvs.h"
@@ -99,24 +100,18 @@ void TraverseNvs::TraverseNvs_PrintAllNvs(const char *ns_name) {
         }
         case NVS_TYPE_STR: {
             size_t len;
-            nvs_get_str(handle, info.key, NULL, &len); 
-            char *val = (char *) malloc(len);
-            nvs_get_str(handle, info.key, val, &len);
-            ESP_LOGI(TAG, "Type: string | Value: %s", val);
-            free(val);
+            if (nvs_get_str(handle, info.key, NULL, &len) == ESP_OK) {
+                /* NVS may contain Wi-Fi passwords or service tokens. */
+                ESP_LOGI(TAG, "Type: string | Length: %zu | Value: <redacted>", len);
+            }
             break;
         }
         case NVS_TYPE_BLOB: {
             size_t len;
-            nvs_get_blob(handle, info.key, NULL, &len);
-            uint8_t *val = (uint8_t *) malloc(len);
-            nvs_get_blob(handle, info.key, val, &len);
-            ESP_LOGI(TAG, "Type: blob | Length: %zu | Hexadecimal Value: ", len);
-            for (size_t i = 0; i < len; i++) {
-                printf("%02x ", val[i]);
+            if (nvs_get_blob(handle, info.key, NULL, &len) == ESP_OK) {
+                /* Blobs in nvs.net80211 include the STA credentials. */
+                ESP_LOGI(TAG, "Type: blob | Length: %zu | Value: <redacted>", len);
             }
-            printf("\n");
-            free(val);
             break;
         }
         default:
@@ -137,27 +132,34 @@ void TraverseNvs::TraverseNvs_PrintAllNvs(const char *ns_name) {
     ESP_LOGI(TAG, "Traversal completed. A total of %d NVS entries were found.", entry_count);
 }
 
-void TraverseNvs::parse_sta_ssid_blob(const uint8_t *blob_data, size_t blob_len, char *out_ssid) {
+bool TraverseNvs::parse_sta_ssid_blob(const uint8_t *blob_data, size_t blob_len, char *out_ssid) {
     if (blob_data == NULL || blob_len < 4 || out_ssid == NULL) {
-        strcpy(out_ssid, "");
-        return;
+        if (out_ssid != NULL) {
+            out_ssid[0] = '\0';
+        }
+        return false;
     }
-    uint32_t ssid_len = *((uint32_t *) blob_data);
-    ssid_len = (ssid_len > 32) ? 32 : ssid_len;
+    uint32_t ssid_len = 0;
+    memcpy(&ssid_len, blob_data, sizeof(ssid_len));
+    if (ssid_len == 0 || ssid_len > 32 || ssid_len > blob_len - 4) {
+        out_ssid[0] = '\0';
+        return false;
+    }
     memcpy(out_ssid, blob_data + 4, ssid_len);
     out_ssid[ssid_len] = '\0';
-    ESP_LOGI(TAG, "Parsed to SSID: %s (length: %u)", out_ssid, ssid_len);
+    return true;
 }
 
-void TraverseNvs::parse_sta_pswd_blob(const uint8_t *blob_data, size_t blob_len, char *out_password) {
-    if (blob_data == NULL || blob_len == 0 || out_password == NULL) {
-        strcpy(out_password, "");
-        return;
+bool TraverseNvs::parse_sta_pswd_blob(const uint8_t *blob_data, size_t blob_len, char *out_password) {
+    if (out_password == NULL || blob_len > 64 || (blob_data == NULL && blob_len != 0)) {
+        if (out_password != NULL) {
+            out_password[0] = '\0';
+        }
+        return false;
     }
 
-    
     size_t pswd_len = 0;
-    while (pswd_len < blob_len && pswd_len < 64) {
+    while (pswd_len < blob_len) {
         if (blob_data[pswd_len] == '\0') {
             break;
         }
@@ -166,8 +168,7 @@ void TraverseNvs::parse_sta_pswd_blob(const uint8_t *blob_data, size_t blob_len,
     }
 
     out_password[pswd_len] = '\0';
-
-    ESP_LOGI(TAG, "Parsing to password: %s (length: %zu)", out_password, pswd_len);
+    return true;
 }
 
 wifi_credential_t TraverseNvs::Get_WifiCredentialFromNVS(void) {
@@ -195,6 +196,11 @@ wifi_credential_t TraverseNvs::Get_WifiCredentialFromNVS(void) {
     }
 
     
+    if (ssid_blob_len < 4 || ssid_blob_len > 36) {
+        ESP_LOGE(TAG, "Invalid STA SSID data length");
+        nvs_close(handle);
+        return cred;
+    }
     uint8_t *ssid_blob = (uint8_t *) malloc(ssid_blob_len);
     if (ssid_blob == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for the SSID blob");
@@ -209,7 +215,7 @@ wifi_credential_t TraverseNvs::Get_WifiCredentialFromNVS(void) {
         return cred;
     }
     
-    parse_sta_ssid_blob(ssid_blob, ssid_blob_len, cred.ssid);
+    bool ssid_valid = parse_sta_ssid_blob(ssid_blob, ssid_blob_len, cred.ssid);
     free(ssid_blob); 
 
     size_t pswd_blob_len = 0;
@@ -224,24 +230,31 @@ wifi_credential_t TraverseNvs::Get_WifiCredentialFromNVS(void) {
         return cred;
     }
 
-    uint8_t *pswd_blob = (uint8_t *) malloc(pswd_blob_len);
-    if (pswd_blob == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for the password blob.");
+    if (pswd_blob_len > 64) {
+        ESP_LOGE(TAG, "Invalid STA password data length");
         nvs_close(handle);
         return cred;
     }
-    err = nvs_get_blob(handle, "sta.pswd", pswd_blob, &pswd_blob_len);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to read the sta.pswd blob data: %s", esp_err_to_name(err));
-        free(pswd_blob);
+    uint8_t *pswd_blob = pswd_blob_len ? (uint8_t *) malloc(pswd_blob_len) : NULL;
+    if (pswd_blob_len != 0 && pswd_blob == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate password data");
         nvs_close(handle);
         return cred;
     }
-    parse_sta_pswd_blob(pswd_blob, pswd_blob_len, cred.password);
-    free(pswd_blob); 
+    if (pswd_blob_len != 0) {
+        err = nvs_get_blob(handle, "sta.pswd", pswd_blob, &pswd_blob_len);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to read the sta.pswd blob data: %s", esp_err_to_name(err));
+            free(pswd_blob);
+            nvs_close(handle);
+            return cred;
+        }
+    }
+    bool password_valid = parse_sta_pswd_blob(pswd_blob, pswd_blob_len, cred.password);
+    free(pswd_blob);
 
     nvs_close(handle);
-    cred.is_valid = true;
+    cred.is_valid = ssid_valid && password_valid;
 
     return cred;
 }

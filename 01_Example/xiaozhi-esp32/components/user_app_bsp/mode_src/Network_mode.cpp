@@ -1,183 +1,179 @@
 #include <stdio.h>
 #include <string.h>
-#include <esp_heap_caps.h>
-#include <nvs_flash.h>
-#include <driver/rtc_io.h>
-#include <esp_sleep.h>
-#include "display_bsp.h"
-#include "server_app.h"
-#include "button_bsp.h"
-#include "user_app.h"
-#include "traverse_nvs.h"
 
-#define ext_wakeup_pin_3 GPIO_NUM_4
+#include <esp_err.h>
+#include <esp_log.h>
+#include <nvs.h>
+#include <esp_system.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#include "button_bsp.h"
+#include "server_app.h"
+#include "service.h"
+#include "traverse_nvs.h"
+#include "user_app.h"
 
 TraverseNvs *nvs_viewer = NULL;
-static const char *TAG = "NetWorkMode";
-static EventGroupHandle_t sleep_group;
-static uint8_t NetWorkMode = 0;     /*默认*/
+static const char *TAG = "NetworkMode";
+static uint8_t NetWorkMode = 0;
 
 uint8_t Get_nvsNetworkMode(void) {
-    esp_err_t ret;
-    nvs_handle_t my_handle;
-    ret = nvs_open("PhotoPainter", NVS_READWRITE, &my_handle);
-    ESP_ERROR_CHECK(ret);
-    uint8_t netMode = 0;
-    ret                = nvs_get_u8(my_handle, "NetworkMode", &netMode);
-    ESP_ERROR_CHECK(ret);
-    nvs_close(my_handle); 
-    return netMode;
+    nvs_handle_t handle;
+    if (nvs_open("PhotoPainter", NVS_READONLY, &handle) != ESP_OK) {
+        return 0;
+    }
+    uint8_t mode = 0;
+    if (nvs_get_u8(handle, "NetworkMode", &mode) != ESP_OK) {
+        mode = 0;
+    }
+    nvs_close(handle);
+    return mode;
 }
 
 void Set_nvsNetworkMode(uint8_t mode) {
-    esp_err_t ret;
-    nvs_handle_t my_handle;
-    ret = nvs_open("PhotoPainter", NVS_READWRITE, &my_handle);
-    ESP_ERROR_CHECK(ret);
-    uint8_t netMode = 0;
-    ret                = nvs_get_u8(my_handle, "NetworkMode", &netMode);
-    ESP_ERROR_CHECK(ret);
-    if(netMode != mode) {
-        ret = nvs_set_u8(my_handle, "NetworkMode", mode);
-        ESP_ERROR_CHECK(ret);
-        nvs_commit(my_handle);
+    nvs_handle_t handle;
+    if (nvs_open("PhotoPainter", NVS_READWRITE, &handle) != ESP_OK) {
+        ESP_LOGE(TAG, "Unable to open mode settings");
+        return;
     }
-    nvs_close(my_handle); 
+    uint8_t current = 0;
+    esp_err_t err = nvs_get_u8(handle, "NetworkMode", &current);
+    if (err == ESP_ERR_NVS_NOT_FOUND || current != mode) {
+        err = nvs_set_u8(handle, "NetworkMode", mode);
+        if (err == ESP_OK) {
+            err = nvs_commit(handle);
+        }
+    }
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGE(TAG, "Unable to save mode setting: %s", esp_err_to_name(err));
+    }
+    nvs_close(handle);
 }
 
 uint8_t Get_CurrentlyNetworkMode(void) {
     return NetWorkMode;
 }
 
+/* The Web task reports upload progress through these legacy LED event bits. */
 static void Network_user_Task(void *arg) {
-    ePaperDisplay.EPD_Init();
+    (void)arg;
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(ServerPortGroups, set_bit_all, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (get_bit_button(even, 0)) {
-            Red_led_arg = 1;                                           
-            xEventGroupSetBits(Red_led_Mode_queue, set_bit_button(6)); 
-        } else if (get_bit_button(even, 1)) {
-            Red_led_arg = 0;                
-        } else if (get_bit_button(even, 2)) {
-            if (pdTRUE == xSemaphoreTake(epaper_gui_semapHandle,2000)) {
-                xEventGroupSetBits(Green_led_Mode_queue, set_bit_button(6));
-                Green_led_arg = 1;
-                ePaperDisplay.EPD_SDcardBmpShakingColor("/sdcard/02_sys_ap_img/user_send.bmp",0,0);
-                ePaperDisplay.EPD_Display();  
-                xSemaphoreGive(epaper_gui_semapHandle); 
-                Green_led_arg = 0;
-                if(NetWorkMode != Get_NetworkMode()) {
-                    NetWorkMode = Get_NetworkMode();
-                    Set_nvsNetworkMode(NetWorkMode);
-                }
-            }
-        } else if (get_bit_button(even, 5)) {
-            const uint64_t ext_wakeup_pin_3_mask = 1ULL << ext_wakeup_pin_3;
-            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_LOW)); 
-            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(ext_wakeup_pin_3));
-            ESP_ERROR_CHECK(rtc_gpio_pullup_en(ext_wakeup_pin_3));
-            esp_sleep_enable_timer_wakeup(30 * 1000 * 1000); 
-            ServerPort_SetNetworkSleep();                             
-            vTaskDelay(pdMS_TO_TICKS(500));                        
-            esp_deep_sleep_start();                          
-        } else if (get_bit_button(even, 4)) {
-            if(!NetWorkMode) {
-                xEventGroupClearBits(sleep_group, rset_bit_data(0)); 
-                xEventGroupSetBits(sleep_group, set_bit_button(1));  
+        EventBits_t events = xEventGroupWaitBits(
+            ServerPortGroups, GroupBit0 | GroupBit1 | GroupBit2 | GroupBit3,
+            pdTRUE, pdFALSE, portMAX_DELAY);
+        if (events & GroupBit0) {
+            Red_led_arg = 1;
+            xEventGroupSetBits(Red_led_Mode_queue, set_bit_button(6));
+        }
+        if (events & GroupBit1) {
+            Red_led_arg = 0;
+        }
+        if (events & GroupBit2) {
+            /* The manager owns the accepted upload and display request. */
+            xEventGroupSetBits(Green_led_Mode_queue, set_bit_button(1));
+            if (Get_NetworkMode() <= 1 && Get_NetworkMode() != NetWorkMode) {
+                /* The UI applies the selected AP/STA mode after the next reboot. */
+                Set_nvsNetworkMode(Get_NetworkMode());
             }
         }
-    }
-}
-
-static void Network_sleep_Task(void *arg) {
-    size_t time = 0;
-    for (;;) {
-        EventBits_t even = xEventGroupWaitBits(sleep_group, (0x01 | 0x02), pdFALSE, pdFALSE, pdMS_TO_TICKS(1000));
-        if (get_bit_button(even, 0)) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            time++;
-            if (time == 60) {
-                const uint64_t ext_wakeup_pin_3_mask = 1ULL << ext_wakeup_pin_3;
-                ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_LOW)); 
-                ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(ext_wakeup_pin_3));
-                ESP_ERROR_CHECK(rtc_gpio_pullup_en(ext_wakeup_pin_3));
-                esp_sleep_enable_timer_wakeup(30 * 1000 * 1000); // 15s
-                ServerPort_SetNetworkSleep();                             
-                vTaskDelay(pdMS_TO_TICKS(500));                        
-                esp_deep_sleep_start();                          
-            }
-        } else if (get_bit_button(even, 1)) {
-            time = 0;
-            xEventGroupClearBits(sleep_group, rset_bit_data(1)); 
-        }
-    }
-}
-
-static void get_wakeup_gpio(void) {
-    esp_sleep_wakeup_cause_t wakeup_reason = esp_sleep_get_wakeup_cause();
-    if (ESP_SLEEP_WAKEUP_EXT1 == wakeup_reason) {
-        uint64_t wakeup_pins = esp_sleep_get_ext1_wakeup_status();
-        if (wakeup_pins == 0)
-            return;
-        if (wakeup_pins & (1ULL << ext_wakeup_pin_3)) {
-            if(!NetWorkMode) {xEventGroupClearBits(sleep_group, rset_bit_data(0));} 
-        }
-    } else if (ESP_SLEEP_WAKEUP_TIMER == wakeup_reason) {
-    }
-}
-
-static void boot_button_long_press_Task(void *arg) {
-    for (;;) {
-        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, GroupBit1, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (even & GroupBit1) {
-            const uint64_t ext_wakeup_pin_3_mask = 1ULL << ext_wakeup_pin_3;
-            ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup_io(ext_wakeup_pin_3_mask, ESP_EXT1_WAKEUP_ANY_LOW)); 
-            ESP_ERROR_CHECK(rtc_gpio_pulldown_dis(ext_wakeup_pin_3));
-            ESP_ERROR_CHECK(rtc_gpio_pullup_en(ext_wakeup_pin_3));
-            esp_sleep_enable_timer_wakeup(30 * 1000 * 1000);
-            ServerPort_SetNetworkSleep();     
-            vTaskDelay(pdMS_TO_TICKS(500)); 
-            esp_deep_sleep_start();  
+        if (events & GroupBit3) {
+            xEventGroupSetBits(Green_led_Mode_queue, set_bit_button(2));
         }
     }
 }
 
 static void boot_button_click_Task(void *arg) {
+    (void)arg;
     for (;;) {
-        EventBits_t even = xEventGroupWaitBits(BootButtonGroups, GroupBit0, pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
-        if (even & GroupBit0) {      // 单击 切换回AP模式
-            Set_nvsNetworkMode(0);
-            esp_restart();
+        EventBits_t events = xEventGroupWaitBits(
+        BootButtonGroups, GroupBit0, pdTRUE, pdFALSE, portMAX_DELAY);
+        if (events & GroupBit0) {
+            /* Keep the running service alive while entering maintenance AP. */
+            ServerPort_EnterMaintenanceAp();
         }
     }
 }
 
-void User_Network_mode_app_init(void) {
-    if((NetWorkMode = Get_nvsNetworkMode())) {
-        ESP_LOGW(TAG,"STA模式");
+static bool wait_for_photopull_ready(bool already_started) {
+    if (!already_started) {
+        ESP_LOGW(TAG, "PhotoPull service did not start; maintenance remains available");
+        return false;
+    }
+    /* Recovery validates complete BMPs before advertising readiness; 50 files
+     * can take substantially longer than a network timeout on a busy card. */
+    constexpr TickType_t kReadyTimeout = pdMS_TO_TICKS(120000);
+    TickType_t deadline = xTaskGetTickCount() + kReadyTimeout;
+    while (!photopull_ready()) {
+        TickType_t now = xTaskGetTickCount();
+        if (static_cast<int32_t>(now - deadline) >= 0) {
+            ESP_LOGW(TAG, "PhotoPull service readiness timed out");
+            return false;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    return true;
+}
+
+bool User_Network_mode_app_init(void) {
+    NetWorkMode = Get_nvsNetworkMode();
+    const bool service_started = photopull_start();
+    const bool storage_available = SDPort != NULL &&
+                                   SDPort->SDPort_GetSdcardInitOK() != 0;
+
+    wifi_credential_t credentials = {};
+    char ssid[sizeof(credentials.ssid)] = {};
+    char password[sizeof(credentials.password)] = {};
+    /* Recovery owns the SD files while it validates snapshots and schedules
+     * the carousel.  Keep Wi-Fi and HTTP startup behind this bounded local
+     * readiness gate in the normal path. */
+    const bool service_ready = wait_for_photopull_ready(service_started);
+    if (storage_available &&
+        photopull_wifi_credentials(ssid, sizeof(ssid), password, sizeof(password))) {
+        /* SD credentials are for this run only and are never copied to NVS. */
+        snprintf(credentials.ssid, sizeof(credentials.ssid), "%s", ssid);
+        snprintf(credentials.password, sizeof(credentials.password), "%s", password);
+        credentials.is_valid = true;
+    } else if (storage_available) {
         nvs_viewer = new TraverseNvs();
-        wifi_credential_t creden = nvs_viewer->Get_WifiCredentialFromNVS();
-        if(0 == creden.is_valid) {
-            xEventGroupSetBits(Red_led_Mode_queue,GroupBit1); 
-            xTaskCreate(boot_button_click_Task, "boot_button_click_Task", 6 * 1024, NULL, 3, NULL);
-            return;
-        }
-        uint8_t res = ServerPort_NetworkSTAInit(creden); 
-        if(0 == res) {
-            xTaskCreate(boot_button_click_Task, "boot_button_click_Task", 6 * 1024, NULL, 3, NULL);
-            return;
-        }
-        Mdns_init_config();
+        credentials = nvs_viewer->Get_WifiCredentialFromNVS();
+    }
+
+    if (!storage_available) {
+        /* A missing SD card is a maintenance condition.  Do not use stale
+         * nvs.net80211 credentials to enter STA mode for this boot. */
+        ESP_LOGW(TAG, "SD card unavailable; forcing maintenance AP");
+        ServerPort_NetworkAPInit();
+        NetWorkMode = 0;
+    } else if (credentials.is_valid) {
+        /* A failed STA attempt leaves the automatic maintenance AP running. */
+        NetWorkMode = 1;
+        ServerPort_NetworkSTAInit(credentials);
     } else {
-        ESP_LOGW(TAG,"AP模式");
-        sleep_group = xEventGroupCreate();
-        xEventGroupSetBits(sleep_group, set_bit_button(0)); 
         ServerPort_NetworkAPInit();
     }
-    ServerPort_init(SDPort);                                                      
-    xEventGroupSetBits(Red_led_Mode_queue,set_bit_button(0)); 
-    xTaskCreate(Network_user_Task, "Network_user_Task", 6 * 1024, NULL, 2, NULL);
-    if(!NetWorkMode) {xTaskCreate(Network_sleep_Task, "Network_sleep_Task", 4 * 1024, NULL, 2, NULL);}
-    xTaskCreate(boot_button_long_press_Task, "boot_button_user_Task", 4 * 1024, NULL, 2, NULL);
-    get_wakeup_gpio(); 
+    Mdns_init_config();
+    ServerPort_init(SDPort);
+    const bool groups_ready = ServerPortGroups != NULL && BootButtonGroups != NULL &&
+                              Red_led_Mode_queue != NULL && Green_led_Mode_queue != NULL;
+    bool tasks_ready = false;
+    if (groups_ready) {
+        if (Red_led_Mode_queue != NULL) {
+            xEventGroupSetBits(Red_led_Mode_queue, set_bit_button(0));
+        }
+        TaskHandle_t upload_task = NULL;
+        TaskHandle_t button_task = NULL;
+        const BaseType_t upload_created = xTaskCreate(
+            Network_user_Task, "Network_upload_status", 4 * 1024,
+            NULL, 2, &upload_task);
+        const BaseType_t button_created = xTaskCreate(
+            boot_button_click_Task, "boot_button_click_Task", 4 * 1024,
+            NULL, 3, &button_task);
+        tasks_ready = upload_created == pdPASS && button_created == pdPASS;
+        if (!tasks_ready) {
+            ESP_LOGE(TAG, "Network task creation failed");
+        }
+    }
+    const bool web_ready = ServerPort_ready();
+    return service_ready && web_ready && tasks_ready;
 }

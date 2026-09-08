@@ -280,13 +280,14 @@ char *BaseAIModel::BaseAIModel_GetImgName() {
 
 BaseAIModelConfig_t* BaseAIModel::BaseAIModel_SdcardReadAIModelConfig() {
     uint8_t *sdcard_buffer = (uint8_t *)malloc(1024);
-    assert(sdcard_buffer);
-    if(SDPort_->SDPort_ReadFile("/sdcard/06_user_foundation_img/config.txt", sdcard_buffer, NULL) != ESP_OK) {
+    if (!sdcard_buffer) return NULL;
+    size_t config_length = 0;
+    if(SDPort_->SDPort_ReadFile("/sdcard/06_user_foundation_img/config.txt", sdcard_buffer, 1024, &config_length) != ESP_OK) {
         free(sdcard_buffer);
         sdcard_buffer = NULL;
         return NULL;
     }
-    DeserializationError error = deserializeJson(doc, sdcard_buffer);
+    DeserializationError error = deserializeJson(doc, sdcard_buffer, config_length);
     free(sdcard_buffer);
     sdcard_buffer = NULL;
     if (error) {

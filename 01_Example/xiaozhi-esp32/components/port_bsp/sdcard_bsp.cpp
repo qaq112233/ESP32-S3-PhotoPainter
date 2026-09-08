@@ -69,7 +69,9 @@ int CustomSDPort::SDPort_WriteFile(const char *path, const void *data, size_t da
     return ESP_OK;
 }
 
-int CustomSDPort::SDPort_ReadFile(const char *path, uint8_t *buffer, size_t *outLen) {
+int CustomSDPort::SDPort_ReadFile(const char *path, uint8_t *buffer, size_t capacity, size_t *outLen) {
+    if (outLen) *outLen = 0;
+    if (!path || !buffer || !capacity) return ESP_ERR_INVALID_ARG;
     if (sdcard_host == NULL) {
         ESP_LOGE(TAG, "SD card not initialized");
         return ESP_ERR_INVALID_STATE;
@@ -86,20 +88,21 @@ int CustomSDPort::SDPort_ReadFile(const char *path, uint8_t *buffer, size_t *out
         return ESP_ERR_NOT_FOUND;
     }
 
-    fseek(f, 0, SEEK_END);
+    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return ESP_FAIL; }
     long file_size = ftell(f);
-    if (file_size <= 0) {
+    if (file_size <= 0 || static_cast<size_t>(file_size) > capacity) {
         ESP_LOGE(TAG, "Invalid file size");
         fclose(f);
         return ESP_FAIL;
     }
-    fseek(f, 0, SEEK_SET);
+    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return ESP_FAIL; }
 
     size_t bytes_read = fread(buffer, 1, file_size, f);
-    fclose(f);
+    bool complete = bytes_read == static_cast<size_t>(file_size) && !ferror(f);
+    if (fclose(f) != 0) complete = false;
 
     if (outLen) *outLen = bytes_read;
-    return (bytes_read > 0) ? ESP_OK : ESP_FAIL;
+    return complete ? ESP_OK : ESP_FAIL;
 }
 
 int CustomSDPort::SDPort_ReadOffset(const char *path, void *buffer, size_t len, size_t offset) {

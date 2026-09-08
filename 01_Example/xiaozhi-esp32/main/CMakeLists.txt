@@ -33,49 +33,58 @@ set(FONT_AWESOME_20_4 font_awesome_20_4)
 set(FONT_AWESOME_30_4 font_awesome_30_4)
 
 
-# Define source files
-set(SOURCES "audio/audio_codec.cc"
-            "audio/audio_service.cc"
-            "audio/codecs/no_audio_codec.cc"
-            "audio/codecs/box_audio_codec.cc"
-            "audio/codecs/es8311_audio_codec.cc"
-            "audio/codecs/es8374_audio_codec.cc"
-            "audio/codecs/es8388_audio_codec.cc"
-            "audio/codecs/es8389_audio_codec.cc"
-            "audio/codecs/dummy_audio_codec.cc"
-            "audio/processors/audio_debugger.cc"
-            "led/single_led.cc"
-            "led/circular_strip.cc"
-            "led/gpio_led.cc"
-            "display/display.cc"
-            "display/lcd_display.cc"
-            "display/oled_display.cc"
-            "display/lvgl_display/lvgl_display.cc"
-            "display/lvgl_display/emoji_collection.cc"
-            "display/lvgl_display/lvgl_theme.cc"
-            "display/lvgl_display/lvgl_font.cc"
-            "display/lvgl_display/lvgl_image.cc"
-            "display/lvgl_display/gif/lvgl_gif.cc"
-            "display/lvgl_display/gif/gifdec.c"
-            "protocols/protocol.cc"
-            "protocols/mqtt_protocol.cc"
-            "protocols/websocket_protocol.cc"
-            "mcp_server.cc"
-            "system_info.cc"
-            "application.cc"
-            "ota.cc"
-            "settings.cc"
-            "device_state_event.cc"
-            "assets.cc"
-            "main.cc"
-            )
+# Define source files. PhotoPainter's Lite image/network build has its own
+# startup and does not need the legacy voice, protocol or UI stack. Keeping
+# the source selection here makes the exclusion effective before compilation
+# and lets CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI produce the complete build.
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+    set(SOURCES "audio/audio_codec.cc"
+                "audio/audio_service.cc"
+                "audio/codecs/no_audio_codec.cc"
+                "audio/codecs/box_audio_codec.cc"
+                "audio/codecs/es8311_audio_codec.cc"
+                "audio/codecs/es8374_audio_codec.cc"
+                "audio/codecs/es8388_audio_codec.cc"
+                "audio/codecs/es8389_audio_codec.cc"
+                "audio/codecs/dummy_audio_codec.cc"
+                "audio/processors/audio_debugger.cc"
+                "led/single_led.cc"
+                "led/circular_strip.cc"
+                "led/gpio_led.cc"
+                "display/display.cc"
+                "display/lcd_display.cc"
+                "display/oled_display.cc"
+                "display/lvgl_display/lvgl_display.cc"
+                "display/lvgl_display/emoji_collection.cc"
+                "display/lvgl_display/lvgl_theme.cc"
+                "display/lvgl_display/lvgl_font.cc"
+                "display/lvgl_display/lvgl_image.cc"
+                "display/lvgl_display/gif/lvgl_gif.cc"
+                "display/lvgl_display/gif/gifdec.c"
+                "protocols/protocol.cc"
+                "protocols/mqtt_protocol.cc"
+                "protocols/websocket_protocol.cc"
+                "mcp_server.cc"
+                "system_info.cc"
+                "application.cc"
+                "ota.cc"
+                "settings.cc"
+                "device_state_event.cc"
+                "assets.cc"
+                "main.cc")
+    set(INCLUDE_DIRS "." "display" "display/lvgl_display" "audio" "protocols")
+else()
+    set(SOURCES "main.cc")
+    set(INCLUDE_DIRS ".")
+endif()
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "audio" "protocols")
-
-# Add board common files
-file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
-list(APPEND SOURCES ${BOARD_COMMON_SOURCES})
-list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
+# Add board common files only to the legacy/full application. The Lite
+# application does not instantiate Board or any of the voice/UI helpers.
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+    file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)
+    list(APPEND SOURCES ${BOARD_COMMON_SOURCES})
+    list(APPEND INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/boards/common)
+endif()
 
 # Set default LVGL_TEXT_FONT and LVGL_ICON_FONT
 set(LVGL_TEXT_FONT ${FONT_PUHUI_COMMON_14_1})
@@ -264,9 +273,11 @@ elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_AMOLED_1_75)
     set(DEFAULT_ASSETS ${ASSETS_XIAOZHI_PUHUI_COMMON_30_4_EMOJI_64})
 elseif(CONFIG_BOARD_TYPE_ESP32S3_PhotoPaint)
     set(BOARD_TYPE "waveshare-s3-PhotoPainter")
-    set(LVGL_TEXT_FONT ${FONT_PUHUI_BASIC_30_4})
-    set(LVGL_ICON_FONT ${FONT_AWESOME_30_4})
-    set(DEFAULT_ASSETS ${ASSETS_XIAOZHI_PUHUI_COMMON_30_4_EMOJI_64})
+    if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+        set(LVGL_TEXT_FONT ${FONT_PUHUI_BASIC_30_4})
+        set(LVGL_ICON_FONT ${FONT_AWESOME_30_4})
+        set(DEFAULT_ASSETS ${ASSETS_XIAOZHI_PUHUI_COMMON_30_4_EMOJI_64})
+    endif()
 elseif(CONFIG_BOARD_TYPE_ESP32S3_Touch_LCD_1_85C)
     set(BOARD_TYPE "esp32-s3-touch-lcd-1.85c")
     set(LVGL_TEXT_FONT ${FONT_PUHUI_BASIC_16_4})
@@ -528,24 +539,26 @@ elseif(CONFIG_BOARD_TYPE_YUNLIAO_S3)
     set(DEFAULT_ASSETS ${ASSETS_XIAOZHI_PUHUI_COMMON_20_4_EMOJI_64})
 endif()
 
-file(GLOB BOARD_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
-    ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
-)
-list(APPEND SOURCES ${BOARD_SOURCES})
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+    file(GLOB BOARD_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/boards/${BOARD_TYPE}/*.c
+    )
+    list(APPEND SOURCES ${BOARD_SOURCES})
 
-# Select audio processor according to Kconfig
-if(CONFIG_USE_AUDIO_PROCESSOR)
-    list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")
-else()
-    list(APPEND SOURCES "audio/processors/no_audio_processor.cc")
-endif()
-if(CONFIG_USE_AFE_WAKE_WORD)
-    list(APPEND SOURCES "audio/wake_words/afe_wake_word.cc")
-elseif(CONFIG_USE_ESP_WAKE_WORD)
-    list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
-elseif(CONFIG_USE_CUSTOM_WAKE_WORD)
-    list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
+    # Select audio processor according to Kconfig
+    if(CONFIG_USE_AUDIO_PROCESSOR)
+        list(APPEND SOURCES "audio/processors/afe_audio_processor.cc")
+    else()
+        list(APPEND SOURCES "audio/processors/no_audio_processor.cc")
+    endif()
+    if(CONFIG_USE_AFE_WAKE_WORD)
+        list(APPEND SOURCES "audio/wake_words/afe_wake_word.cc")
+    elseif(CONFIG_USE_ESP_WAKE_WORD)
+        list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
+    elseif(CONFIG_USE_CUSTOM_WAKE_WORD)
+        list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
+    endif()
 endif()
 
 # Select language directory according to Kconfig
@@ -598,50 +611,72 @@ endif()
 # Define generation path
 set(LANG_JSON "${CMAKE_CURRENT_SOURCE_DIR}/assets/locales/${LANG_DIR}/language.json")
 set(LANG_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/assets/lang_config.h")
-file(GLOB LANG_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/locales/${LANG_DIR}/*.ogg)
-file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+    file(GLOB LANG_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/locales/${LANG_DIR}/*.ogg)
+    file(GLOB COMMON_SOUNDS ${CMAKE_CURRENT_SOURCE_DIR}/assets/common/*.ogg)
+endif()
 
 # If target chip is ESP32, exclude specific files to avoid build errors
-if(CONFIG_IDF_TARGET_ESP32)
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI AND CONFIG_IDF_TARGET_ESP32)
     list(REMOVE_ITEM SOURCES "audio/codecs/box_audio_codec.cc"
                              "audio/codecs/es8388_audio_codec.cc"
                              "audio/codecs/es8389_audio_codec.cc"
                              "led/gpio_led.cc"
-                             )
+    )
 endif()
 
+set(MAIN_PRIV_REQUIRES app_update nvs_flash esp_event user_app_bsp driver)
+if(EXISTS "${PROJECT_DIR}/components/photopull/CMakeLists.txt")
+    list(APPEND MAIN_PRIV_REQUIRES photopull)
+endif()
+
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     )
+    # Public audio headers expose opus types; its encoder dependency declares
+    # opus privately. Export that requirement for the board/mode consumers too.
+    idf_component_optional_requires(PUBLIC 78__esp-opus 78__esp-opus-encoder
+                                   78__esp-ml307 espressif__esp-sr esp_psram json)
+    idf_component_optional_requires(PRIVATE spi_flash efuse)
+else()
+idf_component_register(SRCS ${SOURCES}
+                       INCLUDE_DIRS ${INCLUDE_DIRS}
+                       PRIV_REQUIRES ${MAIN_PRIV_REQUIRES})
+endif()
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
 # If BOARD_NAME is empty, use BOARD_TYPE
 if(NOT BOARD_NAME)
     set(BOARD_NAME ${BOARD_TYPE})
 endif()
-target_compile_definitions(${COMPONENT_LIB}
-                    PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
-                    PRIVATE DEFAULT_ASSETS=\"${DEFAULT_ASSETS}\" LVGL_TEXT_FONT=${LVGL_TEXT_FONT} LVGL_ICON_FONT=${LVGL_ICON_FONT}
-                    )
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+    target_compile_definitions(${COMPONENT_LIB}
+                        PRIVATE BOARD_TYPE=\"${BOARD_TYPE}\" BOARD_NAME=\"${BOARD_NAME}\"
+                        PRIVATE DEFAULT_ASSETS=\"${DEFAULT_ASSETS}\" LVGL_TEXT_FONT=${LVGL_TEXT_FONT} LVGL_ICON_FONT=${LVGL_ICON_FONT}
+                        )
+endif()
 
 # Add generation rules
-add_custom_command(
-    OUTPUT ${LANG_HEADER}
-    COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
-            --language "${LANG_DIR}"
-            --output "${LANG_HEADER}"
-    DEPENDS
-        ${LANG_JSON}
-        ${PROJECT_DIR}/scripts/gen_lang.py
-    COMMENT "Generating ${LANG_DIR} language config"
-)
+if(CONFIG_PHOTOPAINTER_ENABLE_XIAOZHI)
+    add_custom_command(
+        OUTPUT ${LANG_HEADER}
+        COMMAND python ${PROJECT_DIR}/scripts/gen_lang.py
+                --language "${LANG_DIR}"
+                --output "${LANG_HEADER}"
+        DEPENDS
+            ${LANG_JSON}
+            ${PROJECT_DIR}/scripts/gen_lang.py
+        COMMENT "Generating ${LANG_DIR} language config"
+    )
 
-# Force build generation dependencies
-add_custom_target(lang_header ALL
-    DEPENDS ${LANG_HEADER}
-)
+    # Force build generation dependencies
+    add_custom_target(lang_header ALL
+        DEPENDS ${LANG_HEADER}
+    )
+endif()
 
 if(CONFIG_BOARD_TYPE_ESP_HI)
 set(URL "https://github.com/espressif2022/image_player/raw/main/test_apps/test_8bit")

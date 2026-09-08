@@ -378,6 +378,15 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
 endchoice
 
+config PHOTOPAINTER_ENABLE_XIAOZHI
+    bool "Enable Xiaozhi voice assistant"
+    default n if BOARD_TYPE_ESP32S3_PhotoPaint
+    default y
+    help
+        Keep the legacy Xiaozhi voice, audio, AI, MQTT and MCP stack enabled
+        for other boards. PhotoPainter defaults to the Lite image and network
+        application; enable this option for the complete legacy build.
+
 choice ESP_S3_LCD_EV_Board_Version_TYPE
     depends on BOARD_TYPE_ESP_S3_LCD_EV_Board
     prompt "EV_BOARD Type"

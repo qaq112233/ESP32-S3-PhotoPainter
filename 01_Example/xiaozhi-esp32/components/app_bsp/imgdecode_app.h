@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esp_err.h"
 #include "png.h"
 
 #pragma pack(push, 1) // Ensure that the structure is aligned at 1 byte intervals.
@@ -53,8 +54,8 @@ public:
     void ImgDecode_JPGBufferFree(uint8_t *buffer);
     void ImgDecode_PNGBufferFree(uint8_t *buffer);
     void ImgDecode_BMPBufferFree(uint8_t *buffer);
-    void ImgDecode_DitherRgb888(uint8_t *in_img, uint8_t *out_img, int w, int h);
+    esp_err_t ImgDecode_DitherRgb888(uint8_t *in_img, uint8_t *out_img, int w, int h);
     esp_err_t ImgDecode_EncodingBmpToSdcard(const char *filename, const uint8_t *inRgb, int width, int height);
     /*拉伸缩放算法*/
-    void ImgDecode_ScaleRgb888Nearest(const uint8_t *src, int src_w, int src_h, uint8_t *dst, int dst_w, int dst_h);
+    esp_err_t ImgDecode_ScaleRgb888Nearest(const uint8_t *src, int src_w, int src_h, uint8_t *dst, int dst_w, int dst_h);
 };

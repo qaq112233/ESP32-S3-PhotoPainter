@@ -6,14 +6,52 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <limits.h>
 #include "image_io.h"
 #include "test_decoder.h"
 
 static jpeg_pixel_format_t j_type     = JPEG_PIXEL_FORMAT_RGB888;
 static jpeg_rotate_t       j_rotation = JPEG_ROTATE_0D;
+static const uint64_t k_max_jpeg_pixels = 16ULL * 1024ULL * 1024ULL;
+static const uint64_t k_max_jpeg_input_bytes = 8ULL * 1024ULL * 1024ULL;
+
+static jpeg_error_t checked_output_length(int width, int height,
+                                          jpeg_pixel_format_t format, int *out_len)
+{
+    if (width <= 0 || height <= 0 || out_len == NULL ||
+        (uint64_t)width * (uint64_t)height > k_max_jpeg_pixels) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
+
+    uint64_t bytes_per_pixel;
+    if (format == JPEG_PIXEL_FORMAT_RGB565_LE ||
+        format == JPEG_PIXEL_FORMAT_RGB565_BE ||
+        format == JPEG_PIXEL_FORMAT_CbYCrY) {
+        bytes_per_pixel = 2;
+    } else if (format == JPEG_PIXEL_FORMAT_RGB888) {
+        bytes_per_pixel = 3;
+    } else {
+        return JPEG_ERR_INVALID_PARAM;
+    }
+
+    const uint64_t bytes = (uint64_t)width * (uint64_t)height * bytes_per_pixel;
+    if (bytes == 0 || bytes > (uint64_t)INT_MAX) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
+    *out_len = (int)bytes;
+    return JPEG_ERR_OK;
+}
 
 jpeg_error_t esp_jpeg_decode_one_picture(uint8_t *input_buf, int len, uint8_t **output_buf, int *out_len, int *s_width, int *s_height)
 {
+    if (input_buf == NULL || len <= 0 || (uint64_t)len > k_max_jpeg_input_bytes ||
+        output_buf == NULL || out_len == NULL) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
+    *output_buf = NULL;
+    *out_len = 0;
+    if (s_width != NULL) *s_width = 0;
+    if (s_height != NULL) *s_height = 0;
     uint8_t *out_buf = NULL;
     jpeg_error_t ret = JPEG_ERR_OK;
     jpeg_dec_io_t *jpeg_io = NULL;
@@ -59,20 +97,12 @@ jpeg_error_t esp_jpeg_decode_one_picture(uint8_t *input_buf, int len, uint8_t **
         goto jpeg_dec_failed;
     }
 
-    *out_len = out_info->width * out_info->height * 3;
+    ret = checked_output_length(out_info->width, out_info->height,
+                                config.output_type, out_len);
+    if (ret != JPEG_ERR_OK) goto jpeg_dec_failed;
     if(s_width != NULL) {*s_width = out_info->width;}
     if(s_height != NULL) {*s_height = out_info->height;}
     // Calloc out_put data buffer and update inbuf ptr and inbuf_len
-    if (config.output_type == JPEG_PIXEL_FORMAT_RGB565_LE
-        || config.output_type == JPEG_PIXEL_FORMAT_RGB565_BE
-        || config.output_type == JPEG_PIXEL_FORMAT_CbYCrY) {
-        *out_len = out_info->width * out_info->height * 2;
-    } else if (config.output_type == JPEG_PIXEL_FORMAT_RGB888) {
-        *out_len = out_info->width * out_info->height * 3;
-    } else {
-        ret = JPEG_ERR_INVALID_PARAM;
-        goto jpeg_dec_failed;
-    }
     out_buf = jpeg_calloc_align(*out_len, 16);
     if (out_buf == NULL) {
         ret = JPEG_ERR_NO_MEM;
@@ -96,11 +126,22 @@ jpeg_dec_failed:
     if (out_info) {
         free(out_info);
     }
+    if (ret != JPEG_ERR_OK && out_buf != NULL) {
+        jpeg_free_align(out_buf);
+        out_buf = NULL;
+        *output_buf = NULL;
+        *out_len = 0;
+        if (s_width != NULL) *s_width = 0;
+        if (s_height != NULL) *s_height = 0;
+    }
     return ret;
 }
 
 jpeg_error_t esp_jpeg_decode_one_picture_block(unsigned char *input_buf, int len)
 {
+    if (input_buf == NULL || len <= 0 || (uint64_t)len > k_max_jpeg_input_bytes) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
     unsigned char *output_block = NULL;
     jpeg_error_t ret = JPEG_ERR_OK;
     jpeg_dec_io_t *jpeg_io = NULL;
@@ -142,11 +183,16 @@ jpeg_error_t esp_jpeg_decode_one_picture_block(unsigned char *input_buf, int len
     if (ret != JPEG_ERR_OK) {
         goto jpeg_dec_failed;
     }
+    if (out_info->width <= 0 || out_info->height <= 0 ||
+        (uint64_t)out_info->width * (uint64_t)out_info->height > k_max_jpeg_pixels) {
+        ret = JPEG_ERR_INVALID_PARAM;
+        goto jpeg_dec_failed;
+    }
 
     // Calloc block output data buffer
     int output_len = 0;
     ret = jpeg_dec_get_outbuf_len(jpeg_dec, &output_len);
-    if (ret != JPEG_ERR_OK || output_len == 0) {
+    if (ret != JPEG_ERR_OK || output_len <= 0) {
         goto jpeg_dec_failed;
     }
 
@@ -210,6 +256,13 @@ jpeg_dec_failed:
 
 jpeg_error_t esp_jpeg_stream_open(esp_jpeg_stream_handle_t jpeg_handle)
 {
+    if (jpeg_handle == NULL) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
+    jpeg_handle->jpeg_dec = NULL;
+    jpeg_handle->jpeg_io = NULL;
+    jpeg_handle->out_info = NULL;
+    jpeg_handle->output_type = j_type;
     jpeg_error_t ret = JPEG_ERR_OK;
 
     // Generate default configuration
@@ -220,8 +273,6 @@ jpeg_error_t esp_jpeg_stream_open(esp_jpeg_stream_handle_t jpeg_handle)
     // config.scale.height      = 0;
     // config.clipper.width     = 0;
     // config.clipper.height    = 0;
-    jpeg_handle->output_type = j_type;
-
     // Create jpeg_dec handle
     ret = jpeg_dec_open(&config, &jpeg_handle->jpeg_dec);
     if (ret != JPEG_ERR_OK) {
@@ -245,13 +296,18 @@ jpeg_error_t esp_jpeg_stream_open(esp_jpeg_stream_handle_t jpeg_handle)
 
     // Decoder deinitialize
 jpeg_dec_failed:
-    jpeg_dec_close(jpeg_handle->jpeg_dec);
+    if (jpeg_handle->jpeg_dec != NULL) {
+        jpeg_dec_close(jpeg_handle->jpeg_dec);
+    }
     if (jpeg_handle->jpeg_io) {
         free(jpeg_handle->jpeg_io);
     }
     if (jpeg_handle->out_info) {
         free(jpeg_handle->out_info);
     }
+    jpeg_handle->jpeg_dec = NULL;
+    jpeg_handle->jpeg_io = NULL;
+    jpeg_handle->out_info = NULL;
     return ret;
 }
 
@@ -259,6 +315,15 @@ jpeg_error_t esp_jpeg_stream_decode(esp_jpeg_stream_handle_t jpeg_handle, uint8_
 {
     jpeg_error_t ret = JPEG_ERR_OK;
     unsigned char *out_buf = NULL;
+
+    if (jpeg_handle == NULL || jpeg_handle->jpeg_dec == NULL ||
+        jpeg_handle->jpeg_io == NULL || jpeg_handle->out_info == NULL ||
+        input_buf == NULL || len <= 0 || (uint64_t)len > k_max_jpeg_input_bytes ||
+        output_buf == NULL || out_len == NULL) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
+    *output_buf = NULL;
+    *out_len = 0;
 
     // Set input buffer and buffer len to io_callback
     jpeg_handle->jpeg_io->inbuf = input_buf;
@@ -270,18 +335,11 @@ jpeg_error_t esp_jpeg_stream_decode(esp_jpeg_stream_handle_t jpeg_handle, uint8_
         return ret;
     }
 
-    *out_len = jpeg_handle->out_info->width * jpeg_handle->out_info->height * 3;
-    // Calloc out_put data buffer and update inbuf ptr and inbuf_len
-    if (jpeg_handle->output_type == JPEG_PIXEL_FORMAT_RGB565_LE
-        || jpeg_handle->output_type == JPEG_PIXEL_FORMAT_RGB565_BE
-        || jpeg_handle->output_type == JPEG_PIXEL_FORMAT_CbYCrY) {
-        *out_len = jpeg_handle->out_info->width * jpeg_handle->out_info->height * 2;
-    } else if (jpeg_handle->output_type == JPEG_PIXEL_FORMAT_RGB888) {
-        *out_len = jpeg_handle->out_info->width * jpeg_handle->out_info->height * 3;
-    } else {
-        ret = JPEG_ERR_INVALID_PARAM;
-        return ret;
-    }
+    ret = checked_output_length(jpeg_handle->out_info->width,
+                                jpeg_handle->out_info->height,
+                                jpeg_handle->output_type, out_len);
+    if (ret != JPEG_ERR_OK) return ret;
+    // Calloc output data buffer and update inbuf ptr and inbuf_len
     out_buf = jpeg_calloc_align(*out_len, 16);
     if (out_buf == NULL) {
         ret = JPEG_ERR_NO_MEM;
@@ -293,6 +351,10 @@ jpeg_error_t esp_jpeg_stream_decode(esp_jpeg_stream_handle_t jpeg_handle, uint8_
     // Start decode jpeg
     ret = jpeg_dec_process(jpeg_handle->jpeg_dec, jpeg_handle->jpeg_io);
     if (ret != JPEG_ERR_OK) {
+        jpeg_free_align(out_buf);
+        jpeg_handle->jpeg_io->outbuf = NULL;
+        *output_buf = NULL;
+        *out_len = 0;
         return ret;
     }
     return ret;
@@ -300,14 +362,22 @@ jpeg_error_t esp_jpeg_stream_decode(esp_jpeg_stream_handle_t jpeg_handle, uint8_
 
 jpeg_error_t esp_jpeg_stream_close(esp_jpeg_stream_handle_t jpeg_handle)
 {
+    if (jpeg_handle == NULL) {
+        return JPEG_ERR_INVALID_PARAM;
+    }
     jpeg_error_t ret = JPEG_ERR_OK;
 
-    ret = jpeg_dec_close(jpeg_handle->jpeg_dec);
+    if (jpeg_handle->jpeg_dec != NULL) {
+        ret = jpeg_dec_close(jpeg_handle->jpeg_dec);
+    }
     if (jpeg_handle->jpeg_io) {
         free(jpeg_handle->jpeg_io);
     }
     if (jpeg_handle->out_info) {
         free(jpeg_handle->out_info);
     }
+    jpeg_handle->jpeg_dec = NULL;
+    jpeg_handle->jpeg_io = NULL;
+    jpeg_handle->out_info = NULL;
     return ret;
 }

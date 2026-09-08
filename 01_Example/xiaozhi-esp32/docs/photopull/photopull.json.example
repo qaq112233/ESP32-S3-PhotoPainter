@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "enabled": true,
+  "wifi": { "ssid": "MyWiFi", "password": "replace-with-your-password" },
+  "server": {
+    "base_url": "https://photos.example.com",
+    "manifest_path": "/photopainter/manifest.json",
+    "bearer_token": ""
+  },
+  "poll_interval_sec": 60,
+  "default_display_interval_sec": 300
+}

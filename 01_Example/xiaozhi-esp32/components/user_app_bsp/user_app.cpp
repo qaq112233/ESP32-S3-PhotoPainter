@@ -9,6 +9,7 @@
 #include "power_bsp.h"
 #include "led_bsp.h"
 #include "imgdecode_app.h"
+#include "service.h"
 
 CustomSDPort *SDPort = NULL;
 ImgDecodeDither decdither;
@@ -19,11 +20,11 @@ SemaphoreHandle_t  epaper_gui_semapHandle = NULL; // Mutual exclusion lock to pr
 EventGroupHandle_t epaper_groups;                 // Event group for map refreshing
 EventGroupHandle_t Green_led_Mode_queue = 0;      // Queue for LED blinking, mainly for storing mode parameters
 EventGroupHandle_t Red_led_Mode_queue   = 0;      // Queue for LED blinking, mainly for storing mode parameters
-uint8_t            Green_led_arg        = 0;      // Parameters for LED task
-uint8_t            Red_led_arg          = 0;      // Parameters for LED task
+std::atomic<uint8_t> Green_led_arg{0};
+std::atomic<uint8_t> Red_led_arg{0};
 
 static void Green_led_user_Task(void *arg) {
-    uint8_t *led_arg = (uint8_t *) arg;
+    auto *led_arg = static_cast<std::atomic<uint8_t>*>(arg);
     for (;;) {
         EventBits_t even = xEventGroupWaitBits(Green_led_Mode_queue, set_bit_all, pdFALSE, pdFALSE, portMAX_DELAY);
         if (get_bit_data(even, 1)) {
@@ -96,7 +97,7 @@ static void Green_led_user_Task(void *arg) {
 }
 
 static void Red_led_user_Task(void *arg) {
-    uint8_t *led_arg = (uint8_t *) arg;
+    auto *led_arg = static_cast<std::atomic<uint8_t>*>(arg);
     for (;;) {
         EventBits_t even = xEventGroupWaitBits(Red_led_Mode_queue, set_bit_all, pdFALSE, pdFALSE, portMAX_DELAY);
         if (get_bit_data(even, 0)) {
@@ -137,6 +138,15 @@ static void key1_button_user_Task(void *arg) {
             ESP_ERROR_CHECK(ret);
             if (Mode_value == 0x01) { 
                 xEventGroupClearBits(GP4ButtonGroups, set_bit_button(1));
+                if (photopull_active() && !photopull_stop(160000)) {
+                    nvs_close(my_handle);
+                    ESP_LOGE("mode", "Mode change deferred: services did not stop safely");
+                    continue;
+                }
+                if (xSemaphoreTake(epaper_gui_semapHandle, pdMS_TO_TICKS(160000)) != pdTRUE) {
+                    nvs_close(my_handle);
+                    continue;
+                }
                 ret = nvs_set_u8(my_handle, "Mode_Flag", 0x00);
                 ESP_ERROR_CHECK(ret);
                 ret = nvs_set_u8(my_handle, "PhotPainterMode", 0x04);
@@ -145,15 +155,19 @@ static void key1_button_user_Task(void *arg) {
                 nvs_close(my_handle); 
                 esp_restart();
             }
+            nvs_close(my_handle);
         }
     }
 }
 
 static void boot_button_user_Task(void *arg) {
-    ePaperDisplay.EPD_Init();
     for (;;) {
         EventBits_t even = xEventGroupWaitBits(BootButtonGroups, (0x04), pdTRUE, pdFALSE, pdMS_TO_TICKS(2000));
         if(even & 0x04) { //双击
+            if (photopull_active()) {
+                if (!photopull_request_battery()) ESP_LOGW("display", "Display request busy");
+                continue;
+            }
             if (pdTRUE == xSemaphoreTake(epaper_gui_semapHandle, 2000)) {
                 xEventGroupSetBits(Green_led_Mode_queue,set_bit_button(6));
                 Green_led_arg                   = 1;
@@ -180,10 +194,11 @@ uint8_t User_Mode_init(void)
     SDPort = new CustomSDPort("/sdcard");
     uint8_t sdcard_win = SDPort->SDPort_GetSdcardInitOK();              /* SD Card Initialization */
     if (sdcard_win == 0)
-        return 0;
+        ESP_LOGW("storage", "SD unavailable; maintenance remains available");
     Green_led_Mode_queue = xEventGroupCreate();
     Red_led_Mode_queue   = xEventGroupCreate();
     epaper_groups        = xEventGroupCreate();
+    if (!epaper_gui_semapHandle || !Green_led_Mode_queue || !Red_led_Mode_queue || !epaper_groups) return 0;
     /*GPIO */
     gpio_config_t gpio_conf = {};
     gpio_conf.intr_type     = GPIO_INTR_DISABLE;
@@ -197,10 +212,10 @@ uint8_t User_Mode_init(void)
     } while (!gpio_get_level(GPIO_NUM_4));
     ESP_ERROR_CHECK_WITHOUT_ABORT(gpio_reset_pin(GPIO_NUM_4));
     Custom_ButtonInit();
-    xTaskCreate(key1_button_user_Task, "key1_button_user_Task", 4 * 1024, NULL, 3, NULL);
-    xTaskCreate(boot_button_user_Task, "boot_button_user_Task", 4 * 1024, NULL, 3, NULL);
-    xTaskCreate(Green_led_user_Task, "Green_led_user_Task", 3 * 1024, &Green_led_arg, 2, NULL);
-    xTaskCreate(Red_led_user_Task, "Red_led_user_Task", 3 * 1024, &Red_led_arg, 2, NULL);
-    xTaskCreate(Axp2101_isChargingTask, "Axp2101_isChargingTask", 3 * 1024, NULL, 2, NULL);   //AXP2101 Charging
-    return 1;
+    bool tasks_ready = xTaskCreate(key1_button_user_Task, "key1_button_user_Task", 4 * 1024, NULL, 3, NULL) == pdPASS;
+    tasks_ready &= xTaskCreate(boot_button_user_Task, "boot_button_user_Task", 4 * 1024, NULL, 3, NULL) == pdPASS;
+    tasks_ready &= xTaskCreate(Green_led_user_Task, "Green_led_user_Task", 3 * 1024, &Green_led_arg, 2, NULL) == pdPASS;
+    tasks_ready &= xTaskCreate(Red_led_user_Task, "Red_led_user_Task", 3 * 1024, &Red_led_arg, 2, NULL) == pdPASS;
+    tasks_ready &= xTaskCreate(Axp2101_isChargingTask, "Axp2101_isChargingTask", 3 * 1024, NULL, 2, NULL) == pdPASS;
+    return tasks_ready && ePaperDisplay.Ready() ? 1 : 0;
 }
